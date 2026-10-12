@@ -1,0 +1,171 @@
+{
+  "ci-failure-orchestrator": {
+    "files": 537,
+    "hits": [
+      {
+        "path": "ci_failure_orchestrator/execution.py",
+        "line": 4,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "tests/test_ci_audit.py",
+        "line": 23,
+        "kind": "github_token_shape"
+      },
+      {
+        "path": "tests/test_doctor.py",
+        "line": 12,
+        "kind": "github_token_shape"
+      },
+      {
+        "path": "tests/test_doctor_action.py",
+        "line": 14,
+        "kind": "github_token_shape"
+      },
+      {
+        "path": "tests/test_foundation_phases_2_6.py",
+        "line": 86,
+        "kind": "github_token_shape"
+      },
+      {
+        "path": "tests/test_foundation_phases_2_6.py",
+        "line": 87,
+        "kind": "private_key_marker"
+      },
+      {
+        "path": "tests/test_foundation_phase_10_persistence.py",
+        "line": 177,
+        "kind": "private_key_marker"
+      },
+      {
+        "path": "tests/test_foundation_phase_10_persistence.py",
+        "line": 378,
+        "kind": "private_key_marker"
+      },
+      {
+        "path": "tests/test_foundation_phase_9_escalation.py",
+        "line": 187,
+        "kind": "private_key_marker"
+      },
+      {
+        "path": "tests/test_verification_integrity.py",
+        "line": 291,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "ci_failure_orchestrator/foundation/sandbox.py",
+        "line": 115,
+        "kind": "unsafe_default"
+      }
+    ]
+  },
+  "EvalForge": {
+    "files": 186,
+    "hits": []
+  },
+  "Windows-Network-Recovery-Toolkit": {
+    "files": 2584,
+    "hits": [
+      {
+        "path": "docker-compose.yml",
+        "line": 58,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "docker-compose.yml",
+        "line": 92,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "api/app.py",
+        "line": 48,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "backend/README.md",
+        "line": 82,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "docs/big4-senior-risk-review.md",
+        "line": 39,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "docs/docker-production-shaped-demo.md",
+        "line": 31,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "docs/docker-production-shaped-demo.md",
+        "line": 37,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "docs/proxy_guard.md",
+        "line": 119,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "docs/proxy_known_good_snapshot.md",
+        "line": 72,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "docs/rbac-model.md",
+        "line": 5,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "network_agent/api.py",
+        "line": 17,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "network_agent/api.py",
+        "line": 235,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "scripts/openclaw_task_runner.py",
+        "line": 94,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "tests/test_safety_regression.py",
+        "line": 75,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "backend/auth/dependencies.py",
+        "line": 31,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "src/proxy_guard/proxy_watch.py",
+        "line": 31,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "src/proxy_guard/rollback.py",
+        "line": 409,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "src/proxy_guard/state.py",
+        "line": 51,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "src/proxy_guard/sysmon_attribution.py",
+        "line": 202,
+        "kind": "unsafe_default"
+      },
+      {
+        "path": "tests/policy/test_safety_boundaries.py",
+        "line": 111,
+        "kind": "unsafe_default"
+      }
+    ]
+  }
+}
