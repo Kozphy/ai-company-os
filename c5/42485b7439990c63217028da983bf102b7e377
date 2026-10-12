@@ -1,0 +1,44 @@
+company_os/agents.py
+  h_1d8a7f1e671f32 29-37,44-60,165-173,193-201,214-231,311-317,337-345
+company_os/api.py
+  h_1d8a7f1e671f32 1-2,48-56,65-74,84-91,99-110,122-127,133-140,148-160,172-180,191-198,205-210,216-224,234-238,243-247,252-257,263-270,275-291,322-339,393-401,414-425,436-448,454-465,480-496,541-551
+company_os/authorization.py
+  h_1d8a7f1e671f32 14,27-50,81-96
+company_os/body_limit.py
+  h_1d8a7f1e671f32 12,16-22,24-29,34-42,54-61,76-80
+company_os/cli.py
+  h_1d8a7f1e671f32 21-25,31-43,68-71,89-93
+company_os/config.py
+  h_1d8a7f1e671f32 1-2,11-28,41-49
+company_os/db.py
+  h_1d8a7f1e671f32 1-2,14-25,37-42,53-64,80-88
+company_os/evalforge_import.py
+  h_1d8a7f1e671f32 15,19-37
+company_os/jobs.py
+  h_1d8a7f1e671f32 33,38-45,64-92,196-212,292-304,321-332,350-363,422-439,480-492
+company_os/sales.py
+  h_1d8a7f1e671f32 12-21,30-38,44-54,61-69,78-90
+company_os/scheduler.py
+  h_1d8a7f1e671f32 14-21,23-28,33-43,84-89
+company_os/security.py
+  h_1d8a7f1e671f32 1-2,18-29,46-57,64-71,78-91,103-110,116-123
+company_os/worker.py
+  h_1d8a7f1e671f32 16-32,94-95,97-102,108-124,203-207
+migrations/env.py
+  h_1d8a7f1e671f32 1-2
+migrations/versions/0001_initial.py
+  h_1d8a7f1e671f32 32,41-44
+migrations/versions/0002_customer_authorizations.py
+  h_1d8a7f1e671f32 13,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c542485b7439990c63217028da983bf102b7e377",
+  "prompts": {},
+  "humans": {
+    "h_1d8a7f1e671f32": {
+      "author": "Zixsa <50504962+Kozphy@users.noreply.github.com>"
+    }
+  }
+}
