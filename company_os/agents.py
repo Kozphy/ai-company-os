@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from company_os.sales import ProspectInput, qualify
+
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}$")
 RUN_URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100})/actions/runs/(\d+)$")
-DOMAIN = re.compile(r"^(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}$")
 PROMPT_INJECTION = re.compile(
     r"(?:"
     + "|".join(
@@ -80,24 +81,17 @@ def execute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         record = payload.get("prospect", {})
         if not isinstance(record, dict):
             raise ValueError("invalid prospect")
-        domain = _safe(record.get("domain", ""), 256).lower()
-        if not DOMAIN.fullmatch(domain):
-            raise ValueError("a domain is required; contact discovery and outreach are disabled")
-        criteria = payload.get("criteria", {})
-        if not isinstance(criteria, dict) or len(criteria) > 20:
-            raise ValueError("invalid qualification criteria")
-        fit = sum(1 for value in criteria.values() if value is True)
+        prospect = ProspectInput.model_validate({
+            "domain": record.get("domain"),
+            "criteria": payload.get("criteria", {}),
+            "qualification_threshold": payload.get("qualification_threshold", 0.7),
+        })
         return {
             "workflow": "sales",
             "mode": "OFFLINE_DEMO",
-            "domain": domain,
-            "qualification": {
-                "criteria": criteria,
-                "matched": fit,
-                "score": round(fit / max(1, len(criteria)), 2),
-            },
-            "proposal_status": "DRAFT_ONLY",
+            **qualify(prospect),
             "outbound_status": "DISABLED",
+            "limitations": ["caller-supplied criteria are unverified; human review required"],
         }
     if kind == "delivery":
         report = payload.get("report")

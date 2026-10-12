@@ -23,6 +23,9 @@ the OS deterministic job result.
 PR-07 improves the offline research archive with HTTPS citation normalization,
 deduplication, parsed-but-unverified publication dates, and explicit unknown states.
 These are local commits only; no remote repository or pull request is available.
+PR-08 adds shared strict prospect qualification, tenant-scoped pipeline listing,
+and stored local proposal drafts for qualified prospects. Criteria remain
+caller-supplied and unverified; outbound communication remains disabled.
 Exact status and verified gaps are in `ACCEPTANCE.md`. The initial PR-02 slice is intentionally
 more cohesive than the original PR sequence because the API, worker, schema and
 workflow tests share their interfaces; subsequent live-provider and security

@@ -19,6 +19,8 @@ from company_os.config import Settings
 from company_os.db import make_engine, ready, transaction
 from company_os.evalforge_import import EvalForgeImportError, summarize_export
 from company_os.jobs import JOB_TYPES, Conflict, cancel, submit
+from company_os.sales import ProspectInput as ProspectRequest
+from company_os.sales import qualify
 from company_os.schema import (
     approvals,
     audit,
@@ -793,11 +795,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"entry_id": ident, "created": True, "verified": body.verified}
 
     @app.post("/v1/prospects", status_code=201)
-    def add_prospect(body: dict[str, Any], identity: Principal) -> dict:
+    def add_prospect(body: ProspectRequest, identity: Principal) -> dict:
         require_writer(identity)
-        domain = str(body.get("domain", "")).lower()
-        if not re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z]{2,63}", domain):
-            raise HTTPException(422, "valid prospect domain required")
+        domain = body.domain
+        result = qualify(body)
         with transaction(app.state.engine) as conn:
             old = conn.execute(
                 sa.select(prospects).where(
@@ -805,23 +806,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             ).first()
             if old:
-                return {"prospect_id": old.id, "created": False, "stage": old.stage}
+                qualification = old.body.get("qualification", {})
+                if "threshold" in qualification and (
+                    qualification.get("criteria") != body.criteria
+                    or qualification["threshold"] != body.qualification_threshold
+                ):
+                    raise HTTPException(409, "prospect domain already has different qualification inputs")
+                return {
+                    "prospect_id": old.id,
+                    "created": False,
+                    **old.body,
+                    "domain": old.domain,
+                    "stage": old.stage,
+                    "outreach": "DISABLED",
+                }
             ident = str(uuid.uuid4())
-            stage = "QUALIFIED" if body.get("qualified") is True else "UNQUALIFIED"
             conn.execute(
                 prospects.insert().values(
                     id=ident,
                     tenant_id=identity.tenant_id,
                     domain=domain,
-                    stage=stage,
-                    body={
-                        "domain": domain,
-                        "qualification": body.get("qualification", {}),
-                        "outreach": "DISABLED",
-                    },
+                    stage=result["stage"],
+                    body=result,
                 )
             )
-        return {"prospect_id": ident, "created": True, "stage": stage}
+        return {
+            "prospect_id": ident,
+            "created": True,
+            **result,
+        }
+
+    @app.get("/v1/prospects")
+    def list_prospects(identity: Principal) -> list[dict[str, Any]]:
+        with app.state.engine.connect() as conn:
+            rows = conn.execute(
+                sa.select(prospects)
+                .where(prospects.c.tenant_id == identity.tenant_id)
+                .order_by(prospects.c.domain)
+            ).all()
+        return [
+            {
+                **row.body,
+                "prospect_id": row.id,
+                "domain": row.domain,
+                "stage": row.stage,
+                "outreach": "DISABLED",
+            }
+            for row in rows
+        ]
 
     return app
 

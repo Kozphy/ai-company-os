@@ -17,6 +17,14 @@ Open `http://127.0.0.1:8000/`. `setup` generates a local operator token and prin
 
 Run `.venv\Scripts\kozphy demo` for five synthetic offline results. Checks: `.venv\Scripts\python -m pytest -q` and `.venv\Scripts\ruff check company_os migrations tests`.
 
+Authenticated writers can store a prospect with `POST /v1/prospects`, supplying
+`domain`, named boolean `criteria`, and an optional `qualification_threshold`
+(default `0.7`). `GET /v1/prospects` lists the caller's tenant pipeline. Qualified
+records include a local proposal draft; qualification inputs remain unverified.
+Repeating the same inputs returns the stored record; changing qualification inputs
+for an existing domain returns `409`. Standalone sales jobs produce evidence and
+do not automatically update prospect records.
+
 ## Docker Compose
 
 After setup, `.env` contains a generated PostgreSQL password. Run `docker compose up --build`. The API binds to loopback only; the database has no host port. PostgreSQL data uses a named volume. See [recovery notes](docs/RECOVERY.md). This is a local deployment recipe, not production readiness evidence.

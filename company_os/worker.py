@@ -36,6 +36,19 @@ def deterministic_evaluation(kind: str, payload: dict, output: dict) -> dict:
         )
     if kind == "sales":
         checks["outbound_is_disabled"] = output.get("outbound_status") == "DISABLED"
+        checks["qualification_remains_unverified"] = (
+            output.get("qualification", {}).get("input_status") == "CALLER_SUPPLIED_UNVERIFIED"
+        )
+        checks["proposal_requires_qualification"] = (
+            output.get("stage") == "QUALIFIED"
+            and output.get("proposal_status") == "DRAFT_ONLY"
+            and isinstance(output.get("proposal_markdown"), str)
+            and bool(output["proposal_markdown"])
+        ) or (
+            output.get("stage") == "UNQUALIFIED"
+            and output.get("proposal_status") == "WITHHELD_UNQUALIFIED"
+            and output.get("proposal_markdown") is None
+        )
     if kind == "delivery":
         checks["evidence_reference_is_linked"] = (
             bool(output.get("evidence_reference"))

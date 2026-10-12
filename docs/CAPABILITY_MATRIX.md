@@ -85,5 +85,6 @@ means the described local path exists, not that it is production validated.
 | Delivery linked to same-tenant evidence and valid authorization | IMPLEMENTED / TESTED | `company_os/worker.py`; `tests/test_jobs_agents.py::test_delivery_requires_stored_same_tenant_evidence` |
 | EvalForge JSON artifact import | PARTIAL / TESTED | `company_os/evalforge_import.py`, `company_os/api.py`; `tests/test_evalforge_import.py`; imported verdict stays `UNVERIFIED_IMPORTED` / `REVIEW_ONLY` |
 | Research source archive and citation metadata | PARTIAL / TESTED | `company_os/agents.py::_canonical_source_url`, `_publication_date`; `tests/test_jobs_agents.py::test_research_sources_are_deduplicated_and_dates_remain_unverified`; no retrieval and dates remain unverified |
+| Sales qualification, local proposal drafts and stored prospect pipeline | PARTIAL / TESTED | `company_os/sales.py`, prospect API and sales worker; `tests/test_sales.py`; tenant-scoped records, unverified criteria, drafts withheld when unqualified; no discovery or outreach |
 | EvalForge source/model execution or independently reproduced metrics | MISSING | No server/source dependency or live model call; proprietary source remains separate |
 | Customer identity and signed authorization verification | MISSING | Operator attestation and document digest only |
