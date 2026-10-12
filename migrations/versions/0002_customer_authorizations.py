@@ -10,6 +10,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """Create the customer authorization table when it is absent."""
     bind = op.get_bind()
     if sa.inspect(bind).has_table("authorizations"):
         return
@@ -36,6 +37,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the customer authorization table and its tenant index."""
     bind = op.get_bind()
     if sa.inspect(bind).has_table("authorizations"):
         op.drop_index("ix_authorizations_tenant_id", table_name="authorizations")

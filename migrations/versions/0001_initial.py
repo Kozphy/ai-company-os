@@ -29,6 +29,7 @@ V1_TABLES = (
 
 
 def upgrade() -> None:
+    """Create the v1 tables and insert the global control row as running."""
     version_one = sa.MetaData()
     for table_name in V1_TABLES:
         metadata.tables[table_name].to_metadata(version_one)
@@ -37,6 +38,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the v1 tables.
+
+    This destroys local state. Take a backup before downgrading.
+    """
     bind = op.get_bind()
     for table_name in reversed(V1_TABLES):
         metadata.tables[table_name].drop(bind, checkfirst=True)

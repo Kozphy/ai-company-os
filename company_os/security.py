@@ -1,3 +1,5 @@
+"""Bearer-token identities and payload redaction for the local API."""
+
 import hashlib
 import json
 import re
@@ -13,7 +15,18 @@ _SECRET_PATTERNS = (
 
 
 def redact(value: object) -> object:
-    """Remove common credential forms before task payloads are persisted."""
+    """Remove common credential forms before task payloads are persisted.
+
+    Matching text is replaced with ``[REDACTED]`` while a recognized label
+    such as ``password=`` is kept. Dicts and lists are walked recursively.
+    Other types are returned unchanged.
+
+    Args:
+        value: JSON-like value to redact.
+
+    Returns:
+        A redacted copy of ``value``.
+    """
     if isinstance(value, str):
         result = value
         for pattern in _SECRET_PATTERNS:
@@ -30,18 +43,52 @@ def redact(value: object) -> object:
 
 
 def digest(body: object) -> str:
+    """Hash a JSON-compatible value with stable key order.
+
+    Args:
+        body: Value accepted by ``json.dumps`` with ``allow_nan=False``.
+
+    Returns:
+        Lowercase SHA-256 hex digest of the compact UTF-8 JSON.
+
+    Raises:
+        TypeError: ``body`` contains a value JSON cannot encode.
+        ValueError: ``body`` contains NaN or infinity.
+    """
     data = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
     return hashlib.sha256(data.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
 class Identity:
+    """Authenticated caller.
+
+    Attributes:
+        tenant_id: Tenant the token is allowed to access.
+        actor_id: Stable actor name stored on writes.
+        role: ``operator``, ``member``, or ``reader``.
+    """
+
     tenant_id: str
     actor_id: str
     role: str
 
 
 def authenticate(request: Request) -> Identity:
+    """Resolve a bearer token to a configured identity.
+
+    The raw token is hashed before lookup and is not retained.
+
+    Args:
+        request: Incoming request. Its app settings supply the identity map.
+
+    Returns:
+        The identity stored under the token's SHA-256 hash.
+
+    Raises:
+        HTTPException: The header is missing or the hash is unknown. Status
+            is 401.
+    """
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
         raise HTTPException(401, "authentication required")
@@ -53,10 +100,26 @@ def authenticate(request: Request) -> Identity:
 
 
 def require_writer(identity: Identity) -> None:
+    """Allow operators and members to write.
+
+    Args:
+        identity: Authenticated caller.
+
+    Raises:
+        HTTPException: The role is ``reader``. Status is 403.
+    """
     if identity.role not in {"operator", "member"}:
         raise HTTPException(403, "write permission required")
 
 
 def require_operator(identity: Identity) -> None:
+    """Allow only operators.
+
+    Args:
+        identity: Authenticated caller.
+
+    Raises:
+        HTTPException: The role is not ``operator``. Status is 403.
+    """
     if identity.role != "operator":
         raise HTTPException(403, "operator permission required")

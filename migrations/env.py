@@ -1,3 +1,5 @@
+"""Alembic environment. Migrates the database named by ``KOZPHY_DATABASE_URL``."""
+
 from alembic import context
 
 from company_os.config import Settings

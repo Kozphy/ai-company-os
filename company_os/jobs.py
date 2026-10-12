@@ -30,11 +30,19 @@ JOB_COST_MICRO_USD = {kind: 0 for kind in JOB_TYPES}  # no provider adapters are
 
 
 class Conflict(Exception):
-    pass
+    """The queue rejected the request because of a kill switch, replay, or budget."""
 
 
 @dataclass(frozen=True)
 class Submission:
+    """Result of an idempotent job submission.
+
+    Attributes:
+        job_id: New or existing job identifier.
+        status: Current job status.
+        created: ``True`` when this call inserted the job.
+    """
+
     job_id: str
     status: str
     created: bool
@@ -53,6 +61,35 @@ def submit(
     event_key: str | None = None,
     now: float | None = None,
 ) -> Submission:
+    """Queue a tenant job or return the job already stored for the same request.
+
+    Payload secrets are redacted before persistence. A matching idempotency
+    key or event key returns the existing job. A reused key with different
+    content is a conflict. The estimated provider cost is zero because no
+    provider adapter is enabled; that zero is still reserved against the
+    tenant budget.
+
+    Args:
+        engine: Database engine.
+        tenant: Tenant that owns the job.
+        actor: Actor recorded on the job.
+        kind: One of the five workflow names.
+        key: Tenant-scoped idempotency key, 1 to 128 characters.
+        payload: JSON-compatible job input. It is redacted before it is stored.
+        budget_limit: Budget created for the tenant when none exists.
+        maximum_attempts: Attempts allowed before dead-letter. Defaults to 3.
+        event_key: Optional second idempotency key, used by webhook delivery ids.
+        now: Unix timestamp for ``available_at``. Defaults to the current time.
+
+    Returns:
+        The new or existing submission.
+
+    Raises:
+        ValueError: The kind, key, attempt limit, or payload is invalid, or
+            the redacted JSON exceeds 1,000,000 characters.
+        Conflict: A kill switch is active, a key was replayed with different
+            content, or the tenant budget is exhausted.
+    """
     if kind not in JOB_TYPES or not key or len(key) > 128 or not 1 <= maximum_attempts <= 8:
         raise ValueError("invalid job request")
     redacted_payload = redact(payload)
@@ -156,6 +193,23 @@ def submit(
 
 
 def claim(engine: Engine, owner: str, lease_seconds: int, *, now: float | None = None) -> dict | None:
+    """Lease the oldest due job and recover leases that have already expired.
+
+    Expired ``RUNNING`` and ``EVALUATING`` jobs return to ``RETRY_WAIT``, or
+    move to ``DEAD_LETTER`` when attempts are exhausted. Dead-letter releases
+    the reserved budget. Tenants with an enabled kill switch are skipped.
+    The global kill switch returns no work.
+
+    Args:
+        engine: Database engine.
+        owner: Worker id written onto the lease.
+        lease_seconds: How long the new lease lasts.
+        now: Unix timestamp. Defaults to the current time.
+
+    Returns:
+        The claimed job row plus its payload and lease token, or ``None``
+        when no job is due or the claim lost a race.
+    """
     now = time.time() if now is None else now
     with transaction(engine) as conn:
         if conn.execute(sa.select(control.c.stopped).where(control.c.id == 1)).scalar_one():
@@ -235,6 +289,19 @@ def claim(engine: Engine, owner: str, lease_seconds: int, *, now: float | None =
 def heartbeat(
     engine: Engine, job_id: str, token: str, lease_seconds: int, *, now: float | None = None
 ) -> bool:
+    """Extend a live ``RUNNING`` or ``EVALUATING`` lease.
+
+    Args:
+        engine: Database engine.
+        job_id: Job to extend.
+        token: Lease token from ``claim``.
+        lease_seconds: New lease length measured from ``now``.
+        now: Unix timestamp. Defaults to the current time.
+
+    Returns:
+        ``True`` when the lease was extended. ``False`` when the token, status,
+        or expiry does not match.
+    """
     now = time.time() if now is None else now
     with transaction(engine) as conn:
         result = conn.execute(
@@ -251,6 +318,18 @@ def heartbeat(
 
 
 def start_evaluation(engine: Engine, task: dict, *, now: float | None = None) -> bool:
+    """Move a leased running job to ``EVALUATING``.
+
+    Args:
+        engine: Database engine.
+        task: Claimed job mapping. ``job_id``, ``tenant_id``, and
+            ``lease_token`` must match the live row.
+        now: Unix timestamp. Defaults to the current time.
+
+    Returns:
+        ``True`` when the status changed. ``False`` when the lease no longer
+        matches.
+    """
     now = time.time() if now is None else now
     with transaction(engine) as conn:
         result = conn.execute(
@@ -268,6 +347,20 @@ def start_evaluation(engine: Engine, task: dict, *, now: float | None = None) ->
 
 
 def finish(engine: Engine, task: dict, body: dict, *, now: float | None = None) -> bool:
+    """Store the job report and mark a leased evaluating job completed.
+
+    The reserved estimate is released. Recorded actual cost is zero.
+
+    Args:
+        engine: Database engine.
+        task: Claimed job mapping with a live evaluating lease.
+        body: Report stored as the job's only evidence row.
+        now: Unix timestamp. Defaults to the current time.
+
+    Returns:
+        ``True`` when evidence was stored and the job completed. ``False``
+        when the lease no longer matches.
+    """
     now = time.time() if now is None else now
     report_id = str(uuid.uuid4())
     with transaction(engine) as conn:
@@ -326,6 +419,24 @@ def fail(
     now: float | None = None,
     permanent: bool = False,
 ) -> bool:
+    """Retry a leased job or terminate it and release its reservation.
+
+    Retry delay doubles with the attempt count, up to ``maximum_delay``, and
+    adds a deterministic jitter derived from the job id.
+
+    Args:
+        engine: Database engine.
+        task: Claimed job mapping. The lease token must still be valid.
+        error: Error code stored on the job, truncated to 64 characters.
+        maximum_delay: Cap on the retry backoff in seconds.
+        now: Unix timestamp. Defaults to the current time.
+        permanent: When true, mark the job ``FAILED`` immediately. Otherwise
+            exhausted attempts become ``DEAD_LETTER``.
+
+    Returns:
+        ``True`` when the job was updated. ``False`` when the lease no longer
+        matches.
+    """
     now = time.time() if now is None else now
     with transaction(engine) as conn:
         row = conn.execute(
@@ -366,6 +477,19 @@ def fail(
 
 
 def cancel(engine: Engine, tenant: str, job_id: str, *, now: float | None = None) -> bool:
+    """Cancel a job that has not started or is waiting, and release its reservation.
+
+    Args:
+        engine: Database engine.
+        tenant: Tenant that must own the job.
+        job_id: Job to cancel.
+        now: Unix timestamp. Defaults to the current time.
+
+    Returns:
+        ``True`` when a queued, retrying, or approval-waiting job was
+        cancelled. ``False`` when the job is missing or already active or
+        terminal.
+    """
     now = time.time() if now is None else now
     with transaction(engine) as conn:
         row = conn.execute(sa.select(jobs).where(jobs.c.tenant_id == tenant, jobs.c.job_id == job_id)).first()

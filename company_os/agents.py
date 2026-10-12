@@ -26,13 +26,38 @@ AGENTS = ("engineering", "research", "sales", "delivery", "finance")
 
 
 def _safe(text: object, limit: int = 1000) -> str:
+    """Truncate text and replace common credential shapes.
+
+    Args:
+        text: Value to coerce to text. ``None`` becomes an empty string.
+        limit: Maximum number of characters to keep.
+
+    Returns:
+        The redacted, truncated string.
+    """
     value = "" if text is None else str(text)
     value = re.sub(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,})", "[REDACTED]", value)
     return value[:limit]
 
 
 def execute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Produce an offline demonstration record and deterministic checks."""
+    """Run one offline workflow and return its demonstration record.
+
+    Inputs are data. The result names its mode and the checks a human still
+    has to perform. No workflow calls an external service.
+
+    Args:
+        kind: One of ``engineering``, ``research``, ``sales``, ``delivery``,
+            or ``finance``.
+        payload: Caller-supplied workflow input.
+
+    Returns:
+        A workflow record with an explicit offline mode and limitations.
+
+    Raises:
+        ValueError: ``kind`` is unsupported or ``payload`` fails that
+            workflow's shape checks.
+    """
     if kind == "engineering":
         return _engineering(payload)
     if kind == "research":
@@ -137,6 +162,15 @@ def execute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _canonical_source_url(value: str) -> str | None:
+    """Normalize an HTTPS source URL, or reject one that is not usable.
+
+    Args:
+        value: Candidate URL.
+
+    Returns:
+        A lowercase-host HTTPS URL without userinfo or a fragment, or
+        ``None`` when the value is not a public HTTPS URL.
+    """
     try:
         parts = urlsplit(value)
         hostname = parts.hostname
@@ -156,6 +190,15 @@ def _canonical_source_url(value: str) -> str | None:
 
 
 def _publication_date(value: object) -> tuple[str | None, str]:
+    """Classify a caller-supplied publication date without treating it as verified.
+
+    Args:
+        value: Raw date from a source record.
+
+    Returns:
+        The parsed ISO timestamp, or ``None``, and a status of ``UNKNOWN``,
+        ``INVALID``, or ``PARSED_UNVERIFIED``.
+    """
     if value is None or value == "":
         return None, "UNKNOWN"
     if not isinstance(value, str):
@@ -168,6 +211,24 @@ def _publication_date(value: object) -> tuple[str | None, str]:
 
 
 def _engineering(payload: dict[str, Any]) -> dict[str, Any]:
+    """Build an engineering record from webhook metadata or a CI history export.
+
+    A ``workflow_run`` payload records metadata only. A history export must
+    declare a private repository and a window of 1 to 90 days. When the pinned
+    CI adapter is installed, its advice is rewritten so required checks stay
+    blocking. Otherwise a local count of completed runs is returned.
+
+    Args:
+        payload: Engineering job payload.
+
+    Returns:
+        An imported offline engineering record. The markdown report is
+        ``None`` when the external adapter is not installed.
+
+    Raises:
+        ValueError: The event or export is invalid, oversized, or not marked
+            as an authorized private repository.
+    """
     export = payload.get("export")
     if payload.get("event") == "workflow_run":
         run_id = payload.get("run_id")
@@ -247,7 +308,13 @@ def _engineering(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _preserve_required_ci_gates(analysis: dict[str, Any]) -> None:
-    """Replace upstream advice that weakens mandatory CI checks."""
+    """Replace upstream advice that weakens mandatory CI checks.
+
+    Args:
+        analysis: Mutable analysis mapping from the CI adapter. Findings whose
+            recommendations drop, skip, quarantine, or make checks
+            non-blocking are rewritten in place. A policy notice is always set.
+    """
     prohibited = re.compile(
         r"quarantin|non[- ]blocking|delete (?:the )?tests?|skip (?:tests|checks|work)|"
         r"disable (?:the )?(?:tests?|checks?)|remove (?:the )?(?:tests?|checks?)",
@@ -267,6 +334,15 @@ def _preserve_required_ci_gates(analysis: dict[str, Any]) -> None:
 
 
 def _fallback_analysis(export: dict[str, Any]) -> dict[str, Any]:
+    """Summarize a CI history export without the external adapter.
+
+    Args:
+        export: A ``ci-audit.export.v1`` mapping that already passed shape checks.
+
+    Returns:
+        Counts of completed, failed, and succeeded runs, a failure rate, and
+        redacted failure categories. Findings are empty.
+    """
     runs = [r for r in export["runs"] if isinstance(r, dict) and r.get("status") == "completed"]
     failed = sum(r.get("conclusion") in {"failure", "timed_out", "startup_failure"} for r in runs)
     success = sum(r.get("conclusion") == "success" for r in runs)

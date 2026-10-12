@@ -11,11 +11,36 @@ from company_os.schema import schedules
 
 
 class Scheduler:
+    """Submit one job per due schedule tick.
+
+    Each tick uses the idempotency key ``schedule:{id}:{scheduled_at}``. A
+    repeated tick therefore returns the existing job. A tenant kill switch
+    skips submission and still advances the schedule. Any other submit
+    conflict is raised.
+    """
+
     def __init__(self, engine: Engine, budget_limit: int):
+        """Bind the scheduler to a database and a default tenant budget.
+
+        Args:
+            engine: Database engine.
+            budget_limit: Budget applied when a tenant has no budget row yet.
+        """
         self.engine = engine
         self.budget_limit = budget_limit
 
     def run_once(self, *, now: float | None = None) -> int:
+        """Submit every schedule that is due at ``now``.
+
+        Args:
+            now: Unix timestamp. Defaults to the current time.
+
+        Returns:
+            The number of due ticks advanced.
+
+        Raises:
+            Conflict: Submission failed for a reason other than a kill switch.
+        """
         current = time.time() if now is None else now
         count = 0
         while True:
@@ -56,6 +81,12 @@ class Scheduler:
             count += 1
 
     def run_forever(self, poll_seconds: float = 15.0) -> None:
+        """Poll ``run_once`` until the process is stopped.
+
+        Args:
+            poll_seconds: Delay between polls. ``run_once`` still drains every
+                tick that is already due before sleeping.
+        """
         while True:
             self.run_once()
             time.sleep(poll_seconds)
