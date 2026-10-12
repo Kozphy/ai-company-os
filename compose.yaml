@@ -1,0 +1,60 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: company_os
+      POSTGRES_USER: company_os
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run kozphy setup before Compose}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U company_os -d company_os"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  api:
+    build: .
+    command: ["sh", "-c", "kozphy migrate && kozphy api --host 0.0.0.0"]
+    env_file: .env
+    environment:
+      KOZPHY_DATABASE_URL: postgresql+psycopg://company_os:${POSTGRES_PASSWORD}@db:5432/company_os
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+  worker:
+    build: .
+    command: ["kozphy", "worker"]
+    env_file: .env
+    environment:
+      KOZPHY_DATABASE_URL: postgresql+psycopg://company_os:${POSTGRES_PASSWORD}@db:5432/company_os
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+  scheduler:
+    build: .
+    command: ["kozphy", "scheduler"]
+    env_file: .env
+    environment:
+      KOZPHY_DATABASE_URL: postgresql+psycopg://company_os:${POSTGRES_PASSWORD}@db:5432/company_os
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+volumes:
+  pgdata:

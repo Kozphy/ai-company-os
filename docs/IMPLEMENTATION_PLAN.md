@@ -1,10 +1,23 @@
 # Reviewable implementation plan
 
-Phase 0 precedes application code. Build an offline CI audit vertical slice first;
-then extend workflows. Each boundary is a separate local commit and review packet.
+Phase 0 preceded application code. This snapshot contains the first local offline
+vertical slice and operator-preparation packet; later phases remain incomplete.
+Each boundary is a separate local commit and review packet.
 Do not merge automatically. Draft remote PRs depend on a reviewed private repository
 publication, network access and credentials. No cloud resources or customer
 communication authorized by this plan.
+
+## Current local progress
+
+PR-01 is committed. PR-02 implements a broad but offline local slice: API, SQL
+schema, job leases/retries/scheduling, webhook dedupe, five workflow demos,
+deterministic evaluation, evidence, budgets, approval/outbox, ledger, and dashboard.
+PR-03 adds local Compose/CI preparation and commercial templates. Both are local
+work only; no remote repository or pull request is available. Exact status and
+verified gaps are in `ACCEPTANCE.md`. The initial PR-02 slice is intentionally
+more cohesive than the original PR sequence because the API, worker, schema and
+workflow tests share their interfaces; subsequent live-provider and security
+hardening work remains split into separate packets.
 
 | Packet | Objective | Acceptance / migration / rollback |
 |---|---|---|
