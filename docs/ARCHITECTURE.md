@@ -30,6 +30,8 @@ Kubernetes or a vector DB. Measure contention before changing this choice.
 CFO public MIT functions `ci_audit.analyze_export` / `render_report` are the stable
 read-only surface at audited revision. Optional pinned dependency, with explicit
 offline fallback identified in evidence. No patch/worktree execution.
+The engineering adapter rewrites recommendations that would quarantine, disable,
+delete, skip, or de-block required checks before rendering its Markdown report.
 EF proprietary service stays separate; import versioned deterministic evaluation
 results, validate them, and block failed/unknown results independently of judge.
 WNRT private AGPL stays separate; import redacted evidence, never launch network

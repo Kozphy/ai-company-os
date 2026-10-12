@@ -192,7 +192,10 @@ def _engineering(payload: dict[str, Any]) -> dict[str, Any]:
         from ci_failure_orchestrator.ci_audit import analyze_export, render_report
 
         analysis = analyze_export(safe)
+        _preserve_required_ci_gates(analysis)
         report = render_report(analysis)
+        if analysis["policy_notice"] not in report:
+            report = report.rstrip() + "\n\n## Policy note\n\n" + analysis["policy_notice"] + "\n"
         adapter = "ci-failure-orchestrator@f7b6cf2"
     except ImportError:
         analysis, report = _fallback_analysis(safe), None
@@ -210,6 +213,26 @@ def _engineering(payload: dict[str, Any]) -> dict[str, Any]:
             "human review required",
         ],
     }
+
+
+def _preserve_required_ci_gates(analysis: dict[str, Any]) -> None:
+    """Replace upstream advice that weakens mandatory CI checks."""
+    prohibited = re.compile(
+        r"quarantin|non[- ]blocking|delete (?:the )?tests?|skip (?:tests|checks|work)|"
+        r"disable (?:the )?(?:tests?|checks?)|remove (?:the )?(?:tests?|checks?)",
+        re.I,
+    )
+    for finding in analysis.get("findings", []):
+        recommendation = str(finding.get("recommendation", ""))
+        if prohibited.search(recommendation):
+            finding["recommendation"] = (
+                "Keep all required CI checks blocking. Reproduce and fix the underlying failure, "
+                "preserve coverage, and obtain human review before changing the workflow."
+            )
+            finding["policy_review"] = "MANDATORY_GATES_PRESERVED"
+    analysis["policy_notice"] = (
+        "Recommendations are advisory. Required checks must not be weakened to obtain green CI."
+    )
 
 
 def _fallback_analysis(export: dict[str, Any]) -> dict[str, Any]:

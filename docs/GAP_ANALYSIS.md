@@ -21,7 +21,10 @@ worker cannot finalize; report totals match saved input; unauthorized tenant get
 3. CFO `ci_audit/analyze.py` uses static OS billing multipliers and recommends
    quarantine/deletion of flaky tests in one finding. OS reporting must label
    minute estimates, avoid presenting them as invoices, and replace suggestions
-   that could weaken mandatory gates. No repair execution or merging is enabled.
+   that could weaken mandatory gates. `company_os/agents.py::_preserve_required_ci_gates`
+   applies that deterministic rewrite before report rendering; tested in
+   `tests/test_jobs_agents.py::test_ci_policy_rewrites_recommendations_that_weaken_required_gates`.
+   No repair execution or merging is enabled.
 4. CFO `.github/workflows/auto-merge-after-checks.yml` contains merge code but is
    disabled with `if: false` and manual-only trigger. Do not import that workflow.
 5. EF `app/main.py` exposes local workbench/operator routes without authentication

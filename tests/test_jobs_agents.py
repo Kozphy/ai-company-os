@@ -80,6 +80,18 @@ def test_engineering_rejects_foreign_report_links():
     assert "attacker.example" not in (result["report_markdown"] or "")
 
 
+def test_ci_policy_rewrites_recommendations_that_weaken_required_gates():
+    from company_os.agents import _preserve_required_ci_gates
+
+    analysis = {
+        "findings": [{"recommendation": "Quarantine flaky tests in a non-blocking job."}]
+    }
+    _preserve_required_ci_gates(analysis)
+    recommendation = analysis["findings"][0]["recommendation"]
+    assert "blocking" in recommendation
+    assert analysis["findings"][0]["policy_review"] == "MANDATORY_GATES_PRESERVED"
+
+
 def test_submission_dedupe_tenant_scope_and_payload_conflict(client, auth):
     body = {"job_type": "engineering", "idempotency_key": "one", "payload": {"export": audit_export()}}
     first = client.post("/v1/jobs", headers=auth, json=body)

@@ -12,9 +12,10 @@ communication authorized by this plan.
 PR-01 is committed. PR-02 implements a broad but offline local slice: API, SQL
 schema, job leases/retries/scheduling, webhook dedupe, five workflow demos,
 deterministic evaluation, evidence, budgets, approval/outbox, ledger, and dashboard.
-PR-03 adds local Compose/CI preparation and commercial templates. Both are local
-work only; no remote repository or pull request is available. Exact status and
-verified gaps are in `ACCEPTANCE.md`. The initial PR-02 slice is intentionally
+PR-03 adds local Compose/CI preparation and commercial templates. PR-04 adds a
+deterministic gate against weakening required CI checks in upstream recommendations.
+These are local commits only; no remote repository or pull request is available.
+Exact status and verified gaps are in `ACCEPTANCE.md`. The initial PR-02 slice is intentionally
 more cohesive than the original PR sequence because the API, worker, schema and
 workflow tests share their interfaces; subsequent live-provider and security
 hardening work remains split into separate packets.
