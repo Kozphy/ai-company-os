@@ -73,3 +73,16 @@ mirror is a different repository and was not substituted for private source.
 
 This is the preimplementation baseline. Subsequent work is tracked separately in
 `docs/ACCEPTANCE.md`; do not retroactively upgrade upstream evidence.
+
+## Local OS implementation updates
+
+These statuses describe code added after the source snapshot above; IMPLEMENTED
+means the described local path exists, not that it is production validated.
+
+| Capability | Current status | Local source / test evidence |
+|---|---|---|
+| Customer authorization bound to tenant, repository, date window, digest, expiry and revocation | PARTIAL | `company_os/authorization.py`, `company_os/api.py`, migration `0002`; `tests/test_jobs_agents.py` authorization/revocation/expiry cases |
+| Delivery linked to same-tenant evidence and valid authorization | IMPLEMENTED / TESTED | `company_os/worker.py`; `tests/test_jobs_agents.py::test_delivery_requires_stored_same_tenant_evidence` |
+| EvalForge JSON artifact import | PARTIAL / TESTED | `company_os/evalforge_import.py`, `company_os/api.py`; `tests/test_evalforge_import.py`; imported verdict stays `UNVERIFIED_IMPORTED` / `REVIEW_ONLY` |
+| EvalForge source/model execution or independently reproduced metrics | MISSING | No server/source dependency or live model call; proprietary source remains separate |
+| Customer identity and signed authorization verification | MISSING | Operator attestation and document digest only |

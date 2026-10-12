@@ -50,7 +50,10 @@ sources of truth, divergent auth and job lifecycles, and unnecessary dependencie
 
 Use one SQL database and one business job engine. CFO supplies CI export analysis
 through a pinned optional adapter. EF supplies separately generated versioned
-evaluation artifacts through a validated import contract. WNRT supplies optional
+evaluation artifacts through a validated import contract. The local importer now
+accepts EF JSON exports from the audited revision and records digest/count metadata
+as unverified review-only evidence; it does not import EF code or trust its verdict.
+WNRT supplies optional
 redacted evidence artifacts; Windows operations remain outside this application.
 Do not copy proprietary or AGPL source into the new repo. Owner instructions
 authorize integration, not indiscriminate redistribution or relicensing.

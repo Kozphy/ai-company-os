@@ -17,6 +17,7 @@ from company_os.authorization import AuthorizationError, validate_export
 from company_os.body_limit import BodyLimitMiddleware
 from company_os.config import Settings
 from company_os.db import make_engine, ready, transaction
+from company_os.evalforge_import import EvalForgeImportError, summarize_export
 from company_os.jobs import JOB_TYPES, Conflict, cancel, submit
 from company_os.schema import (
     approvals,
@@ -105,6 +106,12 @@ class AuthorizationRequest(BaseModel):
         if self.window_end > date.today():
             raise ValueError("authorization window must not extend into the future")
         return self
+
+
+class EvalForgeImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_revision: str = Field(min_length=40, max_length=40)
+    artifact_json: str = Field(min_length=2, max_length=900_000)
 
 
 class KillSwitchRequest(BaseModel):
@@ -258,6 +265,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if row is None:
             raise HTTPException(404, "evidence not found")
         return {"evidence_id": row.id, "job_id": row.job_id, "sha256": row.digest, "evidence": row.body}
+
+    @app.post("/v1/jobs/{job_id}/evaluations/evalforge", status_code=201)
+    def import_evalforge_evaluation(
+        job_id: str, body: EvalForgeImportRequest, identity: Principal
+    ) -> dict:
+        require_operator(identity)
+        with app.state.engine.connect() as conn:
+            job = conn.execute(
+                sa.select(jobs.c.job_id).where(
+                    jobs.c.tenant_id == identity.tenant_id, jobs.c.job_id == job_id
+                )
+            ).first()
+        if job is None:
+            raise HTTPException(404, "job not found")
+        try:
+            summary = summarize_export(body.artifact_json, body.source_revision)
+        except EvalForgeImportError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        identifier = digest(
+            {
+                "tenant_id": identity.tenant_id,
+                "job_id": job_id,
+                "artifact_sha256": summary["artifact_sha256"],
+            }
+        )
+        with transaction(app.state.engine) as conn:
+            existing = conn.execute(
+                sa.select(evaluations).where(
+                    evaluations.c.tenant_id == identity.tenant_id,
+                    evaluations.c.job_id == job_id,
+                    evaluations.c.version == "evalforge-import-v1",
+                    evaluations.c.id == identifier,
+                )
+            ).first()
+            if existing is None:
+                conn.execute(
+                    evaluations.insert().values(
+                        id=identifier,
+                        tenant_id=identity.tenant_id,
+                        job_id=job_id,
+                        version="evalforge-import-v1",
+                        body=summary,
+                        created_at=time.time(),
+                    )
+                )
+        return {"evaluation_id": identifier, "evaluation": summary}
 
     @app.post("/v1/worker/run-once")
     def run_worker(identity: Principal) -> dict:

@@ -17,4 +17,6 @@ Updated 2026-10-12. Status reflects only the checks listed below; it is not a pr
 
 Additional verification: See [local implementation evidence](evidence/local-implementation-tests.md) for the latest exact command results. Customer audit exports now require a tenant-scoped operator-recorded authorization matching repository and review window; submission and worker execution check expiry, and revocation is enforced. The operator stores the authorization document digest but the app does not verify the customer's signature or identity. One Starlette/httpx deprecation warning remains. Cloud deployment remains untested. See [upstream audit evidence](evidence/phase0-tests.md).
 
+EvalForge JSON exports from audited revision `4fcec3bc4fa816a533d3445ebc3dc82d38871659` can be imported by an operator for a tenant-owned job. Only a digest and small summary are stored; the source revision is caller-asserted. Imported failure/review counts are unverified and labeled `REVIEW_ONLY`; they never set or override the OS deterministic evaluation.
+
 Known missing acceptance scenarios include database interruption, process kill/restart, retry exhaustion, provider rate limit/timeout, invalid external tool output, full prompt injection cases, cross-tenant enumeration, partial delivery, and PostgreSQL restore. The local MVP does not satisfy the complete Phase 8 acceptance set.

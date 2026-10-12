@@ -17,6 +17,9 @@ deterministic gate against weakening required CI checks in upstream recommendati
 PR-05 adds additive persistence for operator-reviewed customer authorization and
 binds real audit exports/evidence to its repository and review window, rechecking
 expiry and revocation before execution.
+PR-06 adds an authenticated, tenant-scoped importer for the audited EvalForge JSON
+export shape. Imports remain unverified supplementary evidence and cannot alter
+the OS deterministic job result.
 These are local commits only; no remote repository or pull request is available.
 Exact status and verified gaps are in `ACCEPTANCE.md`. The initial PR-02 slice is intentionally
 more cohesive than the original PR sequence because the API, worker, schema and
