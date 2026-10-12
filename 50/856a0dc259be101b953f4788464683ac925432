@@ -1,0 +1,25 @@
+docs/CODE_REVIEW.md
+  s_dc476806929415::t_6f3c8c2280668d 1-60
+.coderabbit.yaml
+  s_dc476806929415::t_6f3c8c2280668d 1-108
+.github/pull_request_template.md
+  s_dc476806929415::t_6f3c8c2280668d 1-30
+README.md
+  s_dc476806929415::t_6f3c8c2280668d 43-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "50856a0dc259be101b953f4788464683ac925432",
+  "prompts": {},
+  "sessions": {
+    "s_dc476806929415": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12ec9-486b-7373-8408-7f6bc5ca12e8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zixsa <50504962+Kozphy@users.noreply.github.com>"
+    }
+  }
+}
