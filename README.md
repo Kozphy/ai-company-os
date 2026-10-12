@@ -42,5 +42,5 @@ After setup, `.env` contains a generated PostgreSQL password. Run `docker compos
 See [capabilities](docs/CAPABILITY_MATRIX.md), [gaps](docs/GAP_ANALYSIS.md), [threat model](docs/THREAT_MODEL.md), and [implementation plan](docs/IMPLEMENTATION_PLAN.md).
 
 CodeRabbit review configuration and a pull request template are included. See
-[Code Review Assistant setup](docs/CODE_REVIEW.md) for the required GitHub App
-activation step and the distinction between configured and verified reviews.
+[Code Review Assistant setup](docs/CODE_REVIEW.md) for verified integration,
+current plan limitations, and GitHub App setup if repository access changes.
