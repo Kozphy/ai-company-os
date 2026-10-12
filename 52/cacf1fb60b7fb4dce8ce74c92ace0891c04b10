@@ -1,0 +1,41 @@
+tests/test_sales.py
+  s_dc476806929415::t_4cd96aee10457f 28-37
+  s_dc476806929415::t_8a3b29b699b0ce 1-27,38-125
+company_os/api.py
+  s_dc476806929415::t_867820e75c9730 22-23,798,800-801,809-822,829-830,833-853
+  s_dc476806929415::t_5222db3c9e0aa9 854-856
+company_os/worker.py
+  s_dc476806929415::t_8a3b29b699b0ce 39-51
+docs/CAPABILITY_MATRIX.md
+  s_dc476806929415::t_4cd96aee10457f 88
+README.md
+  s_dc476806929415::t_4cd96aee10457f 20-27
+company_os/sales.py
+  s_dc476806929415::t_867820e75c9730 1-71
+docs/evidence/local-implementation-tests.md
+  s_dc476806929415::t_4cd96aee10457f 7,9,13,18-19
+docs/IMPLEMENTATION_PLAN.md
+  s_dc476806929415::t_4cd96aee10457f 26-28
+docs/pr/PR-08.md
+  s_dc476806929415::t_4cd96aee10457f 1-23
+company_os/agents.py
+  s_dc476806929415::t_867820e75c9730 9-10,84-88,92,94
+docs/ACCEPTANCE.md
+  s_dc476806929415::t_4cd96aee10457f 24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "52cacf1fb60b7fb4dce8ce74c92ace0891c04b10",
+  "prompts": {},
+  "sessions": {
+    "s_dc476806929415": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12ec9-486b-7373-8408-7f6bc5ca12e8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zixsa <50504962+Kozphy@users.noreply.github.com>"
+    }
+  }
+}
