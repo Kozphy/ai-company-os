@@ -30,6 +30,10 @@ def deterministic_evaluation(kind: str, payload: dict, output: dict) -> dict:
         checks["unverified_claims_not_presented_as_verified"] = all(
             x.get("reliability") == "UNVERIFIED" for x in output.get("sources", [])
         )
+        checks["citation_dates_are_explicitly_qualified"] = all(
+            x.get("publication_date_status") in {"UNKNOWN", "INVALID", "PARSED_UNVERIFIED"}
+            for x in output.get("sources", [])
+        )
     if kind == "sales":
         checks["outbound_is_disabled"] = output.get("outbound_status") == "DISABLED"
     if kind == "delivery":

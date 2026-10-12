@@ -19,4 +19,6 @@ Additional verification: See [local implementation evidence](evidence/local-impl
 
 EvalForge JSON exports from audited revision `4fcec3bc4fa816a533d3445ebc3dc82d38871659` can be imported by an operator for a tenant-owned job. Only a digest and small summary are stored; the source revision is caller-asserted. Imported failure/review counts are unverified and labeled `REVIEW_ONLY`; they never set or override the OS deterministic evaluation.
 
+Research workflows now canonicalize HTTPS citation URLs, deduplicate sources, parse ISO publication timestamps, and preserve `UNKNOWN`, `INVALID`, or `PARSED_UNVERIFIED` date states. They do not retrieve sources or validate publisher identity, date truth, or claim reliability.
+
 Known missing acceptance scenarios include database interruption, process kill/restart, retry exhaustion, provider rate limit/timeout, invalid external tool output, full prompt injection cases, cross-tenant enumeration, partial delivery, and PostgreSQL restore. The local MVP does not satisfy the complete Phase 8 acceptance set.

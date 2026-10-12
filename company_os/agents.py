@@ -4,6 +4,7 @@ import hashlib
 import re
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}$")
 RUN_URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100})/actions/runs/(\d+)$")
@@ -47,15 +48,20 @@ def execute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
                 _safe(item.get("title"), 500),
                 item.get("published_at"),
             )
-            ident = hashlib.sha256(url.encode()).hexdigest()
-            if not url.startswith("https://") or ident in seen:
+            canonical_url = _canonical_source_url(url)
+            if canonical_url is None:
+                continue
+            ident = hashlib.sha256(canonical_url.encode()).hexdigest()
+            if ident in seen:
                 continue
             seen.add(ident)
+            publication_date, publication_status = _publication_date(published)
             records.append(
                 {
-                    "url": url,
+                    "url": canonical_url,
                     "title": title,
-                    "published_at": published,
+                    "published_at": publication_date,
+                    "publication_date_status": publication_status,
                     "claim": _safe(item.get("claim")),
                     "reliability": "UNVERIFIED",
                     "content_is_untrusted": True,
@@ -134,6 +140,37 @@ def execute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
             ),
         }
     raise ValueError("unsupported job type")
+
+
+def _canonical_source_url(value: str) -> str | None:
+    try:
+        parts = urlsplit(value)
+        hostname = parts.hostname
+        port = parts.port
+    except ValueError:
+        return None
+    if (
+        parts.scheme.lower() != "https"
+        or not hostname
+        or parts.username is not None
+        or parts.password is not None
+        or hostname.lower() == "localhost"
+    ):
+        return None
+    netloc = hostname.lower() + (f":{port}" if port is not None else "")
+    return urlunsplit(("https", netloc, parts.path or "/", parts.query, ""))
+
+
+def _publication_date(value: object) -> tuple[str | None, str]:
+    if value is None or value == "":
+        return None, "UNKNOWN"
+    if not isinstance(value, str):
+        return None, "INVALID"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None, "INVALID"
+    return parsed.isoformat(), "PARSED_UNVERIFIED"
 
 
 def _engineering(payload: dict[str, Any]) -> dict[str, Any]:

@@ -80,6 +80,28 @@ def test_engineering_rejects_foreign_report_links():
     assert "attacker.example" not in (result["report_markdown"] or "")
 
 
+def test_research_sources_are_deduplicated_and_dates_remain_unverified():
+    output = execute(
+        "research",
+        {
+            "sources": [
+                {"url": "https://Example.test/paper#section", "published_at": "2026-01-03T12:00:00Z"},
+                {"url": "https://example.test/paper", "published_at": "yesterday"},
+                {"url": "https://example.test/other", "published_at": "yesterday"},
+                {"url": "https://user:pass@example.test/private"},
+                {"url": "file:///etc/passwd"},
+            ]
+        },
+    )
+    assert len(output["sources"]) == 2
+    source = output["sources"][0]
+    assert source["url"] == "https://example.test/paper"
+    assert source["published_at"] == "2026-01-03T12:00:00+00:00"
+    assert source["publication_date_status"] == "PARSED_UNVERIFIED"
+    assert source["reliability"] == "UNVERIFIED"
+    assert output["sources"][1]["publication_date_status"] == "INVALID"
+
+
 def test_ci_policy_rewrites_recommendations_that_weaken_required_gates():
     from company_os.agents import _preserve_required_ci_gates
 
