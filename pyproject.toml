@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kozphy-ai-company-os"
+version = "0.1.0"
+description = "Local evidence-first business operations MVP"
+requires-python = ">=3.11"
+dependencies = ["fastapi==0.143.0", "uvicorn==0.54.0", "sqlalchemy==2.1.4", "alembic==1.20.0", "pydantic-settings==2.15.0", "httpx==0.28.1", "psycopg[binary]==3.3.6", "opentelemetry-api==1.45.1"]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "ruff==0.17.0", "mypy==2.4.0"]
+engineering = ["ci-failure-orchestrator @ git+https://github.com/Kozphy/ci-failure-orchestrator.git@f7b6cf2e65b3d2ef3f15cecb4fc1c65874c3f56f"]
+
+[project.scripts]
+kozphy = "company_os.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["company_os*"]
+
+[tool.setuptools.package-data]
+company_os = ["dashboard.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+exclude = [".audit", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true

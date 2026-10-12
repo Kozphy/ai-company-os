@@ -54,6 +54,8 @@ Trusted identity config supplies tenant, actor and role. Payloads cannot self-gr
 customer authorization. Operator approval binds full action payload, resource,
 actor and expiry. Production startup must refuse local token authentication until
 verified identity/TLS/managed secrets are implemented.
+Global and per-tenant kill switches stop new admission and worker claims. ASGI
+request limits cap both declared and streamed request bodies at 1 MB.
 
 ## ADR-005: Evidence and business truth
 

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kozphy AI Company OS · Local Operator</title>
+<style>
+  :root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; background: #101820; color: #e6edf3 }
+  body { max-width: 900px; margin: 3rem auto; padding: 0 1rem }
+  h1 { font-size: 1.7rem } p, small { color: #a8b4c0 }
+  input, button { font: inherit; padding: .65rem; border-radius: .4rem; border: 1px solid #52606d }
+  input { width: min(34rem, 90%); background: #18232d; color: inherit }
+  button { background: #b2f5ea; color: #102020; cursor: pointer }
+  pre { background: #18232d; padding: 1rem; overflow: auto; border-radius: .5rem }
+  .tag { color: #fbd38d }
+</style>
+<body>
+<h1>Kozphy AI Company OS</h1>
+<p class="tag">Local operator view · offline workflows · no production claims</p>
+<p>Enter the one-time operator token printed by <code>kozphy setup</code>. The token stays in this page's memory and is not saved.</p>
+<form id="login"><label for="token">Operator token</label><br><input id="token" type="password" autocomplete="off" required><button>Load records</button></form>
+<h2>Stored dashboard data</h2><pre id="result">No records loaded.</pre>
+<script>
+let operatorToken = "";
+document.querySelector("#login").addEventListener("submit", async event => {
+  event.preventDefault();
+  operatorToken = document.querySelector("#token").value;
+  document.querySelector("#token").value = "";
+  const out = document.querySelector("#result");
+  try {
+    const response = await fetch("/v1/dashboard", {headers: {Authorization: `Bearer ${operatorToken}`}});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    out.textContent = JSON.stringify(data, null, 2);
+  } catch (error) { out.textContent = String(error); }
+});
+</script>
+</body>
+</html>
