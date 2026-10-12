@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+early_access: false
+inheritance: false
+tone_instructions: "Give concise, evidence-backed findings with file references, impact, and a practical fix. Prioritize correctness and security over style."
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  allow_author_approval: false
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_status: true
+  review_details: true
+  fail_commit_status: true
+  poem: false
+  in_progress_fortune: false
+  auto_apply_labels: false
+  auto_assign_reviewers: false
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+  finishing_touches:
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+    simplify:
+      enabled: false
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+  path_filters:
+    - "!.audit/**"
+    - "!.venv/**"
+    - "!runtime/**"
+    - "!artifacts/**"
+    - "!**/__pycache__/**"
+  path_instructions:
+    - path: "company_os/**"
+      instructions: |
+        Review tenant-scoped resource access and default-deny permissions, approval
+        action/resource/actor/expiry/digest binding, secret redaction, and untrusted
+        content handling. Flag any supplied content that can grant tool authority.
+        Check lease fencing, heartbeat timing, atomic persistence, retries, event
+        dedupe, cancellation, kill switches, and integer micro-USD budget limits.
+        External effects require explicit trusted approval; never recommend automatic
+        merging, weakening required checks, or running customer code on the host.
+        Preserve UNKNOWN and incomplete results. LLM judges cannot override failed
+        deterministic checks. Caller claims and demo data are not verified evidence.
+    - path: "migrations/**"
+      instructions: |
+        Check additive migration safety, tenant constraints, transaction behavior on
+        both SQLite and PostgreSQL, and compatibility with schema readiness checks.
+        Identify backup, rollout, and rollback implications of destructive changes.
+    - path: "tests/**"
+      instructions: |
+        Prefer meaningful negative and integration cases for tenant isolation,
+        approval tampering/replay/expiry, lease recovery, idempotency, cost exhaustion,
+        and secret leakage. Tests must remain offline unless expressly authorized.
+        Mocked or simulated provider outcomes are not live-provider evidence.
+    - path: ".github/**"
+      instructions: |
+        Check least-privilege workflow permissions, immutable action revisions,
+        untrusted PR inputs, credential exposure, and unsafe pull_request_target use.
+        Required tests must remain blocking. No automatic merge or deployment.
+    - path: "docs/**"
+      instructions: |
+        Check claims against code and actual execution evidence. Distinguish local,
+        simulated, unverified, and deployed behavior. US$149 is a pricing hypothesis;
+        do not imply verified revenue, customers, certification, or 24/7 readiness.
+        Preserve private/proprietary upstream boundaries and cite precise limitations.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  automatic_linking_mode: disabled
+  linked_repositories: []
+  learnings:
+    scope: local
+  issues:
+    scope: local
+  pull_requests:
+    scope: local
+  web_search:
+    enabled: false
+  jira:
+    usage: disabled
+  linear:
+    usage: disabled
+  mcp:
+    usage: disabled
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "docs/THREAT_MODEL.md"
+      - "docs/ARCHITECTURE.md"
+
+issue_enrichment:
+  auto_enrich:
+    enabled: false
+  planning:
+    enabled: false
