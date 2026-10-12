@@ -12,10 +12,29 @@ EVALFORGE_REVISION = "4fcec3bc4fa816a533d3445ebc3dc82d38871659"
 
 
 class EvalForgeImportError(ValueError):
-    pass
+    """The EvalForge artifact is the wrong revision or has an invalid shape."""
 
 
 def summarize_export(artifact_json: str, source_revision: str) -> dict[str, Any]:
+    """Summarize one pinned EvalForge export without storing its raw rows.
+
+    Only ``run_id``, ``project_id``, and per-row ``result_id``, ``correct``,
+    and ``needs_human_review`` are read. Prompts and model output are dropped.
+    The caller-supplied revision is recorded as unverified.
+
+    Args:
+        artifact_json: JSON text of an EvalForge export.
+        source_revision: Git revision the caller claims produced the artifact.
+            It must equal ``EVALFORGE_REVISION``.
+
+    Returns:
+        A review-only summary marked ``UNVERIFIED_IMPORTED``. It cannot
+        override the local deterministic gate.
+
+    Raises:
+        EvalForgeImportError: The revision, JSON, or result shape is not
+            accepted. Exports must contain 1 to 10,000 result objects.
+    """
     if source_revision != EVALFORGE_REVISION:
         raise EvalForgeImportError("unsupported_evalforge_revision")
     try:

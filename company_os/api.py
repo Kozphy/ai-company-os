@@ -1,3 +1,5 @@
+"""Local HTTP API for jobs, operator controls, and the offline workflows."""
+
 import hashlib
 import hmac
 import json
@@ -43,6 +45,15 @@ Principal = Annotated[Identity, Depends(authenticate)]
 
 
 class JobRequest(BaseModel):
+    """Body for ``POST /v1/jobs``.
+
+    Attributes:
+        job_type: Offline workflow to run.
+        idempotency_key: Tenant-scoped replay key.
+        payload: Workflow input. Extra fields on this model itself are rejected.
+        maximum_attempts: Attempts before the job is dead-lettered.
+    """
+
     model_config = ConfigDict(extra="forbid")
     job_type: Literal["engineering", "research", "sales", "delivery", "finance"]
     idempotency_key: str = Field(min_length=1, max_length=128)
@@ -51,6 +62,16 @@ class JobRequest(BaseModel):
 
 
 class ApprovalRequest(BaseModel):
+    """Body for ``POST /v1/approvals``.
+
+    Attributes:
+        actor_id: Operator the approval is bound to. It must match the caller.
+        action: Approved effect, ``delivery.package`` or ``sales.proposal``.
+        resource: Resource the effect may name.
+        payload: Exact payload whose digest the effect must repeat.
+        lifetime_seconds: Seconds until the unused approval expires.
+    """
+
     model_config = ConfigDict(extra="forbid")
     actor_id: str = Field(min_length=1, max_length=128)
     action: Literal["delivery.package", "sales.proposal"]
@@ -60,6 +81,14 @@ class ApprovalRequest(BaseModel):
 
 
 class EffectRequest(BaseModel):
+    """Body for ``POST /v1/effects``.
+
+    Attributes:
+        approval_id: Unused approval that must match this payload.
+        effect_key: Tenant-scoped idempotency key for the outbox row.
+        payload: Effect body. Its digest must equal the approval digest.
+    """
+
     model_config = ConfigDict(extra="forbid")
     approval_id: str
     effect_key: str = Field(min_length=1, max_length=128)
@@ -67,6 +96,18 @@ class EffectRequest(BaseModel):
 
 
 class LedgerRequest(BaseModel):
+    """Body for ``POST /v1/ledger``.
+
+    Attributes:
+        event_key: Tenant-scoped idempotency key.
+        kind: ``income``, ``expense``, ``llm_cost``, or ``cloud_cost``.
+        amount_micro_usd: Nonnegative amount in millionths of a USD.
+        source_reference: Caller-supplied source label. It is not verified.
+        verified: Must stay false. Independent verification is unavailable.
+        demo: Marks the entry as demonstration data.
+        details: Short string annotations stored with the entry.
+    """
+
     model_config = ConfigDict(extra="forbid")
     event_key: str = Field(min_length=1, max_length=128)
     kind: Literal["income", "expense", "llm_cost", "cloud_cost"]
@@ -78,11 +119,25 @@ class LedgerRequest(BaseModel):
 
 
 class BudgetRequest(BaseModel):
+    """Body for ``PUT /v1/budget``.
+
+    Attributes:
+        limit_micro_usd: Tenant ceiling in millionths of a USD.
+    """
+
     model_config = ConfigDict(extra="forbid")
     limit_micro_usd: int = Field(ge=0, le=10**15)
 
 
 class ScheduleRequest(BaseModel):
+    """Body for ``POST /v1/schedules``.
+
+    Attributes:
+        job_type: Workflow submitted on each tick.
+        payload: Job payload repeated on each tick.
+        interval_seconds: Delay between ticks, from one hour to one year.
+    """
+
     model_config = ConfigDict(extra="forbid")
     job_type: Literal["engineering", "research", "sales", "delivery", "finance"]
     payload: dict[str, Any]
@@ -90,6 +145,19 @@ class ScheduleRequest(BaseModel):
 
 
 class AuthorizationRequest(BaseModel):
+    """Body for ``POST /v1/authorizations``.
+
+    Attributes:
+        customer_name: Customer named by the operator.
+        signer_name: Person the operator records as the signer.
+        repository: Authorized ``owner/name`` repository.
+        window_start: Inclusive first day of the audit window.
+        window_end: Inclusive last day of the audit window.
+        authorization_digest: Caller-supplied SHA-256 hex digest of the
+            authorization document.
+        lifetime_seconds: How long the stored record stays active.
+    """
+
     model_config = ConfigDict(extra="forbid")
     customer_name: str = Field(min_length=1, max_length=256)
     signer_name: str = Field(min_length=1, max_length=256)
@@ -101,6 +169,15 @@ class AuthorizationRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_window(self) -> "AuthorizationRequest":
+        """Reject an inverted, oversized, or future-dated window.
+
+        Returns:
+            This request.
+
+        Raises:
+            ValueError: The window is longer than 90 days, ends before it
+                starts, or ends after today.
+        """
         if self.window_end < self.window_start:
             raise ValueError("authorization window end precedes start")
         if (self.window_end - self.window_start).days > 90:
@@ -111,17 +188,40 @@ class AuthorizationRequest(BaseModel):
 
 
 class EvalForgeImportRequest(BaseModel):
+    """Body for ``POST /v1/jobs/{job_id}/evaluations/evalforge``.
+
+    Attributes:
+        source_revision: Forty-character revision the caller claims produced
+            the artifact.
+        artifact_json: Raw EvalForge export JSON. Raw rows are not stored.
+    """
+
     model_config = ConfigDict(extra="forbid")
     source_revision: str = Field(min_length=40, max_length=40)
     artifact_json: str = Field(min_length=2, max_length=900_000)
 
 
 class KillSwitchRequest(BaseModel):
+    """Body for the tenant and global kill-switch endpoints.
+
+    Attributes:
+        enabled: ``True`` stops new work. ``False`` allows it again.
+    """
+
     model_config = ConfigDict(extra="forbid")
     enabled: bool
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the local API, including the request-size limit.
+
+    Args:
+        settings: Runtime settings. When omitted, settings load from the
+            environment.
+
+    Returns:
+        An application whose engine and settings live on ``app.state``.
+    """
     settings = settings or Settings()
     app = FastAPI(title="Kozphy AI Company OS — local MVP", version="0.1.0")
     app.state.settings = settings
@@ -131,23 +231,64 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
+        """Report that the process is up.
+
+        Returns:
+            A local-MVP status. This does not check the database.
+        """
         return {"status": "ok", "maturity": "local MVP"}
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def operator_dashboard() -> str:
+        """Return the operator dashboard HTML.
+
+        Returns:
+            The packaged ``dashboard.html`` document. It does not embed credentials.
+        """
         return (Path(__file__).parent / "dashboard.html").read_text(encoding="utf-8")
 
     @app.get("/ready")
     def readiness() -> JSONResponse:
+        """Report whether the migrated control database is reachable.
+
+        Returns:
+            HTTP 200 when revision ``0002`` and the control row are present,
+            otherwise HTTP 503.
+        """
         available = ready(app.state.engine)
         return JSONResponse({"ready": available}, status_code=200 if available else 503)
 
     @app.get("/v1/me")
     def me(identity: Principal) -> dict[str, str]:
+        """Return the authenticated tenant, actor, and role.
+
+        Args:
+            identity: Caller resolved from the bearer token.
+
+        Returns:
+            The caller's identity fields.
+        """
         return {"tenant_id": identity.tenant_id, "actor_id": identity.actor_id, "role": identity.role}
 
     @app.post("/v1/jobs", status_code=202)
     def create_job(body: JobRequest, identity: Principal) -> dict:
+        """Queue a workflow job for the caller's tenant.
+
+        Engineering jobs require a covering customer authorization unless the
+        caller is an operator and the payload sets ``demo`` to true. Writers only.
+
+        Args:
+            body: Job type, idempotency key, and payload.
+            identity: Authenticated writer.
+
+        Returns:
+            The job id, current status, and whether this call created it.
+
+        Raises:
+            HTTPException: The caller cannot write, the engineering
+                authorization does not cover the export, or the queue rejects
+                the request as a conflict or invalid payload.
+        """
         require_writer(identity)
         if body.job_type == "engineering":
             if body.payload.get("demo") is True and identity.role == "operator":
@@ -178,6 +319,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/v1/webhooks/github", status_code=202)
     async def github_webhook(request: Request) -> dict:
+        """Queue an engineering job from a signed GitHub ``workflow_run`` event.
+
+        Ingestion is disabled when no webhook secret is configured. Only
+        completed failure and timeout conclusions for a routed repository are
+        queued. The stored payload is event metadata, not logs.
+
+        Args:
+            request: Raw GitHub delivery. ``X-Hub-Signature-256`` must match
+                the configured secret.
+
+        Returns:
+            Whether the event was accepted and, when queued, the job id.
+
+        Raises:
+            HTTPException: The webhook is disabled, the signature or event
+                shape is invalid, the repository is not routed, or the
+                delivery id conflicts with a different payload.
+        """
         if not settings.webhook_secret:
             raise HTTPException(404, "webhook ingestion is disabled")
         raw = await request.body()
@@ -231,6 +390,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/jobs")
     def list_jobs(identity: Principal, limit: int = 100) -> list[dict]:
+        """List the caller's jobs, newest first.
+
+        Args:
+            identity: Authenticated caller. Results stay inside this tenant.
+            limit: Page size from 1 to 200. Values outside that range are clamped.
+
+        Returns:
+            Job views without payloads.
+        """
         limit = min(max(limit, 1), 200)
         with app.state.engine.connect() as conn:
             rows = conn.execute(
@@ -243,6 +411,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/jobs/{job_id}")
     def get_job(job_id: str, identity: Principal) -> dict:
+        """Return one job in the caller's tenant.
+
+        Args:
+            job_id: Job identifier.
+            identity: Authenticated caller.
+
+        Returns:
+            The job view.
+
+        Raises:
+            HTTPException: No job with this id exists in the tenant.
+        """
         with app.state.engine.connect() as conn:
             row = conn.execute(
                 sa.select(jobs).where(jobs.c.tenant_id == identity.tenant_id, jobs.c.job_id == job_id)
@@ -253,11 +433,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/v1/jobs/{job_id}/cancel")
     def cancel_job(job_id: str, identity: Principal) -> dict:
+        """Cancel a queued, waiting, or approval-pending job.
+
+        Args:
+            job_id: Job identifier.
+            identity: Authenticated writer.
+
+        Returns:
+            Whether the job was cancelled. An active or missing job returns
+            ``cancelled`` false.
+
+        Raises:
+            HTTPException: The caller cannot write.
+        """
         require_writer(identity)
         return {"cancelled": cancel(app.state.engine, identity.tenant_id, job_id)}
 
     @app.get("/v1/jobs/{job_id}/evidence")
     def get_evidence(job_id: str, identity: Principal) -> dict:
+        """Return the stored report for one job.
+
+        Args:
+            job_id: Job identifier.
+            identity: Authenticated caller.
+
+        Returns:
+            The evidence id, job id, digest, and report body.
+
+        Raises:
+            HTTPException: This tenant has no evidence for the job.
+        """
         with app.state.engine.connect() as conn:
             row = conn.execute(
                 sa.select(evidence).where(
@@ -272,6 +477,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def import_evalforge_evaluation(
         job_id: str, body: EvalForgeImportRequest, identity: Principal
     ) -> dict:
+        """Attach a review-only EvalForge summary to an existing job.
+
+        The same artifact digest is stored once. The import does not change
+        the job status or the deterministic gate. Operators only.
+
+        Args:
+            job_id: Job that receives the supplementary evaluation.
+            body: Pinned source revision and raw export JSON.
+            identity: Authenticated operator.
+
+        Returns:
+            The evaluation id and the review-only summary.
+
+        Raises:
+            HTTPException: The caller is not an operator, the job is outside
+                the tenant, or the artifact is rejected.
+        """
         require_operator(identity)
         with app.state.engine.connect() as conn:
             job = conn.execute(
@@ -316,6 +538,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/v1/worker/run-once")
     def run_worker(identity: Principal) -> dict:
+        """Claim and process at most one job in this process.
+
+        Args:
+            identity: Authenticated operator.
+
+        Returns:
+            Whether a job was processed.
+
+        Raises:
+            HTTPException: The caller is not an operator.
+        """
         require_operator(identity)
         return {"processed": Worker(app.state.engine, lease_seconds=settings.lease_seconds).run_once()}
 

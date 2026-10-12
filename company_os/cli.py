@@ -18,11 +18,29 @@ from company_os.worker import Worker
 
 
 def _alembic() -> Config:
+    """Load Alembic settings from ``alembic.ini``.
+
+    Returns:
+        A config object pointed at the project migration script.
+    """
     config = Config("alembic.ini")
     return config
 
 
 def setup(database_url: str, tenant: str, actor: str) -> None:
+    """Create ``.env``, print a one-time operator token, and migrate the database.
+
+    The token is stored only as a SHA-256 hash inside ``KOZPHY_IDENTITIES_JSON``.
+    A Postgres password is written for local compose and is not the operator token.
+
+    Args:
+        database_url: SQLAlchemy URL for the local database.
+        tenant: Tenant id granted to the new operator.
+        actor: Actor id granted to the new operator.
+
+    Raises:
+        SystemExit: ``.env`` already exists.
+    """
     env_path = Path(".env")
     if env_path.exists():
         raise SystemExit(".env already exists; remove it yourself to reinitialize")
@@ -47,6 +65,10 @@ def setup(database_url: str, tenant: str, actor: str) -> None:
 
 
 def demo() -> None:
+    """Print synthetic offline records for all five workflows.
+
+    The printed JSON is demonstration output and is not persisted.
+    """
     from company_os.agents import execute
 
     samples: dict[str, dict[str, Any]] = {
@@ -64,6 +86,11 @@ def demo() -> None:
 
 
 def main() -> None:
+    """Dispatch ``setup``, ``migrate``, ``api``, ``worker``, ``scheduler``, or ``demo``.
+
+    ``migrate``, ``api``, ``worker``, and ``scheduler`` load settings from the
+    environment. ``api`` listens on ``127.0.0.1:8000`` unless overridden.
+    """
     parser = argparse.ArgumentParser(prog="kozphy")
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("setup", help="create a local .env, operator token and database")

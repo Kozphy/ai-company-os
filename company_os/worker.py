@@ -13,6 +13,23 @@ from company_os.schema import evaluations, evidence
 
 
 def deterministic_evaluation(kind: str, payload: dict, output: dict) -> dict:
+    """Check an offline workflow result against fixed local rules.
+
+    ``payload`` is accepted so callers share one signature with the workflow
+    runner and is not scored. Research sources must stay unverified. Sales
+    proposals appear only for qualified prospects. Delivery must name stored
+    tenant evidence plus a valid authorization, or a ``demo-`` reference.
+    Finance must leave bank figures empty. No model judge is run.
+
+    Args:
+        kind: Workflow name the output claims to serve.
+        payload: Job payload. It is not inspected.
+        output: Workflow result to score.
+
+    Returns:
+        A ``deterministic-v1`` report with ``passed``, per-check booleans,
+        and ``llm_judge`` set to ``NOT_RUN``.
+    """
     review_marked = (
         any("human" in str(item).lower() for item in output.get("limitations", []))
         or output.get("review_status") == "AWAITING_HUMAN_SIGNOFF"
@@ -74,12 +91,37 @@ def deterministic_evaluation(kind: str, payload: dict, output: dict) -> dict:
 
 
 class Worker:
+    """Claim one job, run its offline workflow, and store the evaluation."""
+
     def __init__(self, engine: Engine, *, lease_seconds: int = 60):
+        """Bind this worker to an engine and a fresh owner id.
+
+        Args:
+            engine: Database engine.
+            lease_seconds: Lease length in seconds.
+        """
         self.engine = engine
         self.lease_seconds = lease_seconds
         self.owner = "worker-" + uuid.uuid4().hex
 
     def run_once(self, *, now: float | None = None) -> bool:
+        """Process at most one leased job.
+
+        Engineering exports are checked against a customer authorization
+        unless the payload is marked ``demo``. Delivery requires stored
+        same-tenant evidence and a covering authorization, except references
+        that start with ``demo-``. A failed deterministic check is a
+        permanent failure. Other exceptions are retried by the queue.
+
+        Args:
+            now: Unix timestamp used for the claim, authorization, and
+                completion. Defaults to the current time.
+
+        Returns:
+            ``True`` when a job was claimed, including when that job then
+            failed. ``False`` when the queue had no work or the lease was
+            lost before completion.
+        """
         moment = time.time() if now is None else now
         task = claim(self.engine, self.owner, self.lease_seconds, now=moment)
         if task is None:
@@ -158,6 +200,11 @@ class Worker:
         return True
 
     def run_forever(self, poll_seconds: float = 1.0) -> None:
+        """Poll ``run_once`` until the process is stopped.
+
+        Args:
+            poll_seconds: Sleep interval after a poll that finds no work.
+        """
         while True:
             if not self.run_once():
                 time.sleep(poll_seconds)
