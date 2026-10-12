@@ -7,7 +7,7 @@ unknowns remain distinct. No paid model, customer, or production claims.
 flowchart LR
   Client[Authenticated operator] --> API[FastAPI]
   GitHub[Signed workflow_run event] --> API
-  API --> SQL[(SQL state: jobs, evidence, approvals, ledger, outbox)]
+  API --> SQL[(SQL state: jobs, evidence, authorizations, approvals, ledger, outbox)]
   Scheduler[Durable schedule tick] --> SQL
   Worker[Leased worker] --> SQL
   Worker --> Agents[Five offline typed workflows]
@@ -66,6 +66,10 @@ deterministic evaluation and mode OFFLINE_DEMO / IMPORTED / LIVE_VERIFIED.
 Generated text is a proposal until human sign-off. Ledger events need source
 references and explicitly distinguish operator-attested records from verified
 bank evidence. USD149 is a pricing experiment, never inserted as earned revenue.
+Customer authorization is an additive, tenant-scoped record bound to repository,
+review window, expiry and a SHA-256 digest of the reviewed authorization document.
+The operator attests they checked customer-signed authority; the service does not
+verify signatures. The worker rechecks scope, expiry and revocation before work.
 
 ## Deployment shape
 

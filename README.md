@@ -25,6 +25,7 @@ After setup, `.env` contains a generated PostgreSQL password. Run `docker compos
 
 - GitHub webhook accepts signed `workflow_run` metadata and deduplicates delivery IDs. It does not fetch logs or write to GitHub.
 - Engineering analysis accepts an authorized caller-supplied `ci-audit.export.v1`; its origin is not independently verified.
+- Non-demo engineering exports and deliveries require a tenant-scoped operator record of customer authorization, bound to repository, review window, expiry, and the authorization document digest. The operator records that they reviewed customer-signed authority; this app does not verify the customer's signature or independently authenticate the customer.
 - Research does not browse, sales does not contact leads, delivery does not send reports, and finance has no bank/accounting feed.
 - High-risk effects can be approved and written to an outbox, but dispatch is disabled.
 - Budgets enforce recorded estimates. Provider spend is zero offline; infrastructure cost is unknown.

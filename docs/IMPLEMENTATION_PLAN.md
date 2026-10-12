@@ -14,6 +14,9 @@ schema, job leases/retries/scheduling, webhook dedupe, five workflow demos,
 deterministic evaluation, evidence, budgets, approval/outbox, ledger, and dashboard.
 PR-03 adds local Compose/CI preparation and commercial templates. PR-04 adds a
 deterministic gate against weakening required CI checks in upstream recommendations.
+PR-05 adds additive persistence for operator-reviewed customer authorization and
+binds real audit exports/evidence to its repository and review window, rechecking
+expiry and revocation before execution.
 These are local commits only; no remote repository or pull request is available.
 Exact status and verified gaps are in `ACCEPTANCE.md`. The initial PR-02 slice is intentionally
 more cohesive than the original PR sequence because the API, worker, schema and
@@ -26,14 +29,15 @@ hardening work remains split into separate packets.
 | PR-02 | FastAPI config, SQL models, Alembic | Empty clean migration, deny anonymous, schema readiness; backup/revert initial schema |
 | PR-03 | Durable queue, budgets, worker lifecycle | Dedupe, stale fence, recovery, bounded retries, kill switch, outbox; additive tables; drain/backup before rollback |
 | PR-04 | Engineering offline CI export | Stored input -> job -> report evidence; optional CFO adapter; no GitHub writes |
-| PR-05 | Evaluation import / deterministic gate | Failing deterministic checks dominate judge; unknown blocks; versioned golden set |
-| PR-06 | Research brief / schedule | Dated authorized supplied public sources, dedupe, explicit reliability unknowns; no autonomous fetch |
-| PR-07 | Sales qualification / draft | Explicit qualification criteria, authorized prospect, stored pipeline; no outbound adapter |
-| PR-08 | Delivery | Operator customer authorization, immutable report review and local package; no communication |
-| PR-09 | Finance | Idempotent ledger, truthful summaries, costs / quota, DEMO separate |
-| PR-10 | Policy / approvals | Scope+actor+expiry+digest checks, isolation, redaction, signed webhook, security negative tests |
-| PR-11 | Dashboard / observability | Every value from SQL, unknowns visible, evidence drilldown; no seeded production metrics |
-| PR-12 | Compose / recovery / pilot docs | Clean test env, fault tests, PostgreSQL and Compose smoke evidence; prepared cloud shape only |
+| PR-05 | Customer authorization and scoped audit evidence | Additive migration; tenant/repo/window/lifetime binding; expiry/revocation rechecked; no signature verification |
+| PR-06 | Evaluation import / deterministic gate | Failing deterministic checks dominate judge; unknown blocks; versioned golden set |
+| PR-07 | Research brief / schedule | Dated authorized supplied public sources, dedupe, explicit reliability unknowns; no autonomous fetch |
+| PR-08 | Sales qualification / draft | Explicit qualification criteria, authorized prospect, stored pipeline; no outbound adapter |
+| PR-09 | Delivery | Immutable report review and local package; no communication |
+| PR-10 | Finance | Idempotent ledger, truthful summaries, costs / quota, DEMO separate |
+| PR-11 | Policy / approvals | Scope+actor+expiry+digest checks, isolation, redaction, signed webhook, security negative tests |
+| PR-12 | Dashboard / observability | Every value from SQL, unknowns visible, evidence drilldown; no seeded production metrics |
+| PR-13 | Compose / recovery / pilot docs | Clean test env, fault tests, PostgreSQL and Compose smoke evidence; prepared cloud shape only |
 
 Each `docs/pr/PR-NN.md` must state objective, changed files, architecture, migration,
 security, tests and exact execution evidence, limitations, acceptance and rollback.

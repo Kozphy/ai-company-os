@@ -49,6 +49,6 @@ def ready(engine: Engine) -> bool:
     try:
         with engine.connect() as conn:
             revision = conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
-            return revision == "0001" and conn.execute(sa.select(control.c.id)).scalar_one() == 1
+            return revision == "0002" and conn.execute(sa.select(control.c.id)).scalar_one() == 1
     except sa.exc.SQLAlchemyError:
         return False

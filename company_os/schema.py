@@ -169,6 +169,26 @@ prospects = sa.Table(
     sa.Column("body", sa.JSON, nullable=False),
     sa.UniqueConstraint("tenant_id", "domain"),
 )
+authorizations = sa.Table(
+    "authorizations",
+    metadata,
+    sa.Column("id", sa.String(64), primary_key=True),
+    sa.Column("tenant_id", sa.String(128), nullable=False, index=True),
+    sa.Column("repository", sa.String(160), nullable=False),
+    sa.Column("customer_name", sa.String(256), nullable=False),
+    sa.Column("signer_name", sa.String(256), nullable=False),
+    sa.Column("window_start", sa.String(10), nullable=False),
+    sa.Column("window_end", sa.String(10), nullable=False),
+    sa.Column("authorization_digest", sa.String(64), nullable=False),
+    sa.Column("scope_digest", sa.String(64), nullable=False),
+    sa.Column("created_by", sa.String(128), nullable=False),
+    sa.Column("authorized_at", sa.Float, nullable=False),
+    sa.Column("expires_at", sa.Float, nullable=False),
+    sa.Column("status", sa.String(16), nullable=False),
+    sa.Column("revoked_at", sa.Float),
+    sa.CheckConstraint("window_start <= window_end"),
+    sa.CheckConstraint("status IN ('ACTIVE','REVOKED')"),
+)
 schedules = sa.Table(
     "schedules",
     metadata,

@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
 from company_os import agents
+from company_os.authorization import validate_export, validate_scope
 from company_os.jobs import claim, fail, finish, start_evaluation
 from company_os.schema import evaluations, evidence
 
@@ -34,7 +35,11 @@ def deterministic_evaluation(kind: str, payload: dict, output: dict) -> dict:
     if kind == "delivery":
         checks["evidence_reference_is_linked"] = (
             bool(output.get("evidence_reference"))
-            and output.get("input_evidence_status") in {"STORED_TENANT_EVIDENCE", "DEMO_ONLY"}
+            and output.get("input_evidence_status") == "STORED_TENANT_EVIDENCE"
+            and output.get("authorization_status") == "VALID"
+        ) or (
+            bool(output.get("evidence_reference"))
+            and output.get("input_evidence_status") == "DEMO_ONLY"
         )
     if kind == "finance":
         checks["unverified_financial_claims_not_counted"] = (
@@ -63,7 +68,19 @@ class Worker:
         if task is None:
             return False
         try:
+            export_authorization = None
+            if (
+                task["job_type"] == "engineering"
+                and isinstance(task["payload"].get("export"), dict)
+                and task["payload"].get("demo") is not True
+            ):
+                export_authorization = validate_export(
+                    self.engine, task["tenant_id"], task["payload"], now=moment
+                )
             output = agents.execute(task["job_type"], task["payload"])
+            if export_authorization:
+                output["customer_authorization_reference"] = export_authorization["authorization_id"]
+                output["authorization_scope_digest"] = export_authorization["scope_digest"]
             if task["job_type"] == "delivery":
                 reference = task["payload"].get("evidence_reference")
                 if isinstance(reference, str) and reference.startswith("demo-"):
@@ -71,7 +88,7 @@ class Worker:
                 else:
                     with self.engine.connect() as conn:
                         stored = conn.execute(
-                            sa.select(evidence.c.id).where(
+                            sa.select(evidence.c.id, evidence.c.body).where(
                                 evidence.c.id == reference,
                                 evidence.c.tenant_id == task["tenant_id"],
                             )
@@ -79,6 +96,20 @@ class Worker:
                     if stored is None:
                         raise ValueError("delivery_evidence_not_found_for_tenant")
                     output["input_evidence_status"] = "STORED_TENANT_EVIDENCE"
+                    source = stored.body
+                    analysis = source.get("analysis", {}) if isinstance(source, dict) else {}
+                    validated_scope = validate_scope(
+                        self.engine,
+                        tenant_id=task["tenant_id"],
+                        authorization_id=task["payload"].get("authorization_reference"),
+                        repository=source.get("repository") if isinstance(source, dict) else None,
+                        window_start=analysis.get("since"),
+                        window_end=analysis.get("collected_at"),
+                        now=moment,
+                    )
+                    output["authorization_status"] = "VALID"
+                    output["customer_authorization_reference"] = validated_scope["authorization_id"]
+                    output["authorization_scope_digest"] = validated_scope["scope_digest"]
             if not start_evaluation(self.engine, task, now=moment):
                 return False
             report_reference = output.get("evidence_reference")
@@ -103,6 +134,8 @@ class Worker:
                 )
             if not finish(self.engine, task, output, now=moment):
                 return False
+        except ValueError as exc:
+            fail(self.engine, task, type(exc).__name__.lower(), permanent=True, now=moment)
         except Exception as exc:
             fail(self.engine, task, type(exc).__name__.lower(), now=moment)
         return True

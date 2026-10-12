@@ -318,7 +318,13 @@ def finish(engine: Engine, task: dict, body: dict, *, now: float | None = None) 
 
 
 def fail(
-    engine: Engine, task: dict, error: str, maximum_delay: int = 3600, *, now: float | None = None
+    engine: Engine,
+    task: dict,
+    error: str,
+    maximum_delay: int = 3600,
+    *,
+    now: float | None = None,
+    permanent: bool = False,
 ) -> bool:
     now = time.time() if now is None else now
     with transaction(engine) as conn:
@@ -332,14 +338,15 @@ def fail(
         ).first()
         if row is None:
             return False
-        dead = row.attempt_count >= row.maximum_attempts
+        dead = permanent or row.attempt_count >= row.maximum_attempts
+        terminal_status = "FAILED" if permanent else "DEAD_LETTER"
         raw = min(maximum_delay, 2 ** min(row.attempt_count, 10))
         jitter = int(digest([row.job_id, row.attempt_count])[:4], 16) % max(1, raw // 4 + 1)
         conn.execute(
             jobs.update()
             .where(jobs.c.job_id == row.job_id)
             .values(
-                status="DEAD_LETTER" if dead else "RETRY_WAIT",
+                status=terminal_status if dead else "RETRY_WAIT",
                 available_at=now + raw + jitter,
                 updated_at=now,
                 error_code=error[:64],

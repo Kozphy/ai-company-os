@@ -10,6 +10,7 @@ artifacts, operator/browser, upstream repositories, eventual cloud identity.
 | Forged webhook / replay | HMAC over raw body; repo to tenant mapping from trusted config; delivery dedupe in transaction | Rotation and GitHub registration operator tasks |
 | Oversized/chunked request | ASGI middleware counts declared and actual body bytes before route processing; 1 MB cap | Reverse-proxy limits still needed for hosted use |
 | Cross-tenant job/evidence access | Identity from server-side token map, tenant predicates on every query; negative API tests | Local tokens are not production identity |
+| Unauthorized or stale customer audit scope | Persist operator-reviewed authorization per tenant, repository, date window, digest, expiry; validate at submission and again in worker; revocation blocks later work | Operator attestation only; customer signature and identity are not independently verified |
 | Approval substitution / replay | Bound actor, tenant, action, resource, expiry, canonical digest; immutable request; operator role; consumed transactionally | Trusted operator must verify customer authority |
 | Prompt injection in logs / sources | Treat inputs as data, typed validation, no executable tools or outbound model enabled | Pattern detection alone is not a security boundary |
 | Untrusted test execution / secret theft | Disable patch/test execution; separate offline test container without network, socket, credentials | Docker is not a hostile-code multi-tenant sandbox |

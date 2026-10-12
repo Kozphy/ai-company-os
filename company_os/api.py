@@ -4,14 +4,16 @@ import json
 import re
 import time
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import sqlalchemy as sa
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from company_os.authorization import AuthorizationError, validate_export
 from company_os.body_limit import BodyLimitMiddleware
 from company_os.config import Settings
 from company_os.db import make_engine, ready, transaction
@@ -19,6 +21,7 @@ from company_os.jobs import JOB_TYPES, Conflict, cancel, submit
 from company_os.schema import (
     approvals,
     audit,
+    authorizations,
     budgets,
     control,
     evaluations,
@@ -83,6 +86,27 @@ class ScheduleRequest(BaseModel):
     interval_seconds: int = Field(ge=3600, le=31_536_000)
 
 
+class AuthorizationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    customer_name: str = Field(min_length=1, max_length=256)
+    signer_name: str = Field(min_length=1, max_length=256)
+    repository: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}$")
+    window_start: date
+    window_end: date
+    authorization_digest: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    lifetime_seconds: int = Field(default=2_592_000, ge=60, le=7_776_000)
+
+    @model_validator(mode="after")
+    def validate_window(self) -> "AuthorizationRequest":
+        if self.window_end < self.window_start:
+            raise ValueError("authorization window end precedes start")
+        if (self.window_end - self.window_start).days > 90:
+            raise ValueError("authorization window cannot exceed 90 days")
+        if self.window_end > date.today():
+            raise ValueError("authorization window must not extend into the future")
+        return self
+
+
 class KillSwitchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
@@ -116,6 +140,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/v1/jobs", status_code=202)
     def create_job(body: JobRequest, identity: Principal) -> dict:
         require_writer(identity)
+        if body.job_type == "engineering":
+            if body.payload.get("demo") is True and identity.role == "operator":
+                pass
+            else:
+                try:
+                    validate_export(app.state.engine, identity.tenant_id, body.payload)
+                except AuthorizationError as exc:
+                    raise HTTPException(
+                        403, "customer authorization is expired or outside its scope"
+                    ) from exc
         try:
             result = submit(
                 app.state.engine,
@@ -409,6 +443,118 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
             for row in rows
         ]
+
+    @app.post("/v1/authorizations", status_code=201)
+    def record_authorization(body: AuthorizationRequest, identity: Principal) -> dict:
+        require_operator(identity)
+        now, authorization_id = time.time(), str(uuid.uuid4())
+        scope = {
+            "customer_name": body.customer_name,
+            "signer_name": body.signer_name,
+            "repository": body.repository,
+            "window_start": body.window_start.isoformat(),
+            "window_end": body.window_end.isoformat(),
+            "authorization_digest": body.authorization_digest.lower(),
+        }
+        scope_hash = digest(scope)
+        expires_at = now + body.lifetime_seconds
+        with transaction(app.state.engine) as conn:
+            conn.execute(
+                authorizations.insert().values(
+                    id=authorization_id,
+                    tenant_id=identity.tenant_id,
+                    repository=body.repository,
+                    customer_name=body.customer_name,
+                    signer_name=body.signer_name,
+                    window_start=body.window_start.isoformat(),
+                    window_end=body.window_end.isoformat(),
+                    authorization_digest=body.authorization_digest.lower(),
+                    scope_digest=scope_hash,
+                    created_by=identity.actor_id,
+                    authorized_at=now,
+                    expires_at=expires_at,
+                    status="ACTIVE",
+                    revoked_at=None,
+                )
+            )
+            conn.execute(
+                audit.insert().values(
+                    id=str(uuid.uuid4()),
+                    tenant_id=identity.tenant_id,
+                    actor_id=identity.actor_id,
+                    action="customer_authorization.record",
+                    resource=authorization_id,
+                    correlation_id=authorization_id,
+                    created_at=now,
+                    details={
+                        "repository": body.repository,
+                        "scope_digest": scope_hash,
+                        "authorization_digest": body.authorization_digest.lower(),
+                        "expires_at": expires_at,
+                    },
+                )
+            )
+        return {
+            "authorization_id": authorization_id,
+            "repository": body.repository,
+            "scope_digest": scope_hash,
+            "status": "ACTIVE",
+            "expires_at": expires_at,
+        }
+
+    @app.get("/v1/authorizations")
+    def list_authorizations(identity: Principal) -> list[dict]:
+        with app.state.engine.connect() as conn:
+            rows = conn.execute(
+                sa.select(authorizations)
+                .where(authorizations.c.tenant_id == identity.tenant_id)
+                .order_by(authorizations.c.authorized_at.desc())
+            ).all()
+        return [
+            {
+                "authorization_id": row.id,
+                "repository": row.repository,
+                "window_start": row.window_start,
+                "window_end": row.window_end,
+                "scope_digest": row.scope_digest,
+                "status": row.status,
+                "expires_at": row.expires_at,
+            }
+            for row in rows
+        ]
+
+    @app.post("/v1/authorizations/{authorization_id}/revoke")
+    def revoke_authorization(authorization_id: str, identity: Principal) -> dict:
+        require_operator(identity)
+        now = time.time()
+        with transaction(app.state.engine) as conn:
+            row = conn.execute(
+                sa.select(authorizations).where(
+                    authorizations.c.id == authorization_id,
+                    authorizations.c.tenant_id == identity.tenant_id,
+                )
+            ).first()
+            if row is None:
+                raise HTTPException(404, "authorization not found")
+            if row.status == "ACTIVE":
+                conn.execute(
+                    authorizations.update()
+                    .where(authorizations.c.id == authorization_id)
+                    .values(status="REVOKED", revoked_at=now)
+                )
+                conn.execute(
+                    audit.insert().values(
+                        id=str(uuid.uuid4()),
+                        tenant_id=identity.tenant_id,
+                        actor_id=identity.actor_id,
+                        action="customer_authorization.revoke",
+                        resource=authorization_id,
+                        correlation_id=authorization_id,
+                        created_at=now,
+                        details={"scope_digest": row.scope_digest},
+                    )
+                )
+        return {"authorization_id": authorization_id, "status": "REVOKED"}
 
     @app.post("/v1/approvals", status_code=201)
     def create_approval(body: ApprovalRequest, identity: Principal) -> dict:

@@ -93,12 +93,15 @@ def test_ci_policy_rewrites_recommendations_that_weaken_required_gates():
 
 
 def test_submission_dedupe_tenant_scope_and_payload_conflict(client, auth):
-    body = {"job_type": "engineering", "idempotency_key": "one", "payload": {"export": audit_export()}}
+    body = {
+        "job_type": "engineering", "idempotency_key": "one",
+        "payload": {"demo": True, "export": audit_export()},
+    }
     first = client.post("/v1/jobs", headers=auth, json=body)
     second = client.post("/v1/jobs", headers=auth, json=body)
     assert first.status_code == 202 and second.json()["created"] is False
     assert second.json()["job_id"] == first.json()["job_id"]
-    changed = {**body, "payload": {"export": {**audit_export(), "window_days": 7}}}
+    changed = {**body, "payload": {"demo": True, "export": {**audit_export(), "window_days": 7}}}
     assert client.post("/v1/jobs", headers=auth, json=changed).status_code == 409
     other = client.get("/v1/jobs/" + first.json()["job_id"], headers={"Authorization": "Bearer operator-b"})
     assert other.status_code == 404
@@ -114,7 +117,10 @@ def test_worker_persists_report_evaluation_and_evidence(client, auth):
     response = client.post(
         "/v1/jobs",
         headers=auth,
-        json={"job_type": "engineering", "idempotency_key": "audit1", "payload": {"export": audit_export()}},
+        json={
+            "job_type": "engineering", "idempotency_key": "audit1",
+            "payload": {"demo": True, "export": audit_export()},
+        },
     )
     assert response.status_code == 202
     assert client.post("/v1/worker/run-once", headers=auth).json() == {"processed": True}
@@ -129,9 +135,40 @@ def test_worker_persists_report_evaluation_and_evidence(client, auth):
 
 
 def test_delivery_requires_stored_same_tenant_evidence(client, auth):
+    authorization_body = {
+        "customer_name": "Synthetic demo customer",
+        "signer_name": "Demo Signer",
+        "repository": "demo/sample",
+        "window_start": "2026-09-01",
+        "window_end": "2026-10-01",
+        "authorization_digest": "a" * 64,
+        "lifetime_seconds": 3600,
+    }
+    authorization = client.post("/v1/authorizations", headers=auth, json=authorization_body)
+    assert authorization.status_code == 201
+    authorization_id = authorization.json()["authorization_id"]
+    assert client.post(
+        "/v1/authorizations", headers={"Authorization": "Bearer member-a"}, json=authorization_body
+    ).status_code == 403
+    other_tenant = {"Authorization": "Bearer operator-b"}
+    assert client.get("/v1/authorizations", headers=other_tenant).json() == []
+    assert client.post(
+        f"/v1/authorizations/{authorization_id}/revoke", headers=other_tenant
+    ).status_code == 404
+    rejected = client.post(
+        "/v1/jobs", headers=auth,
+        json={
+            "job_type": "engineering", "idempotency_key": "unauthorized",
+            "payload": {"export": audit_export()},
+        },
+    )
+    assert rejected.status_code == 403
     source = client.post(
         "/v1/jobs", headers=auth,
-        json={"job_type": "research", "idempotency_key": "source", "payload": {"sources": []}},
+        json={
+            "job_type": "engineering", "idempotency_key": "source",
+            "payload": {"export": audit_export(), "authorization_reference": authorization_id},
+        },
     ).json()
     client.post("/v1/worker/run-once", headers=auth)
     source_job = client.get(f"/v1/jobs/{source['job_id']}", headers=auth).json()
@@ -139,11 +176,25 @@ def test_delivery_requires_stored_same_tenant_evidence(client, auth):
     delivery = client.post(
         "/v1/jobs", headers=auth,
         json={"job_type": "delivery", "idempotency_key": "delivery",
-              "payload": {"report": "draft", "evidence_reference": source_job["evidence_reference"]}},
+              "payload": {
+                  "report": "draft", "evidence_reference": source_job["evidence_reference"],
+                  "authorization_reference": authorization_id,
+              }},
     ).json()
     client.post("/v1/worker/run-once", headers=auth)
     evidence = client.get(f"/v1/jobs/{delivery['job_id']}/evidence", headers=auth).json()
     assert evidence["evidence"]["input_evidence_status"] == "STORED_TENANT_EVIDENCE"
+    assert evidence["evidence"]["authorization_status"] == "VALID"
+
+    client.post(f"/v1/authorizations/{authorization_id}/revoke", headers=auth)
+    revoked = client.post(
+        "/v1/jobs", headers=auth,
+        json={
+            "job_type": "engineering", "idempotency_key": "revoked",
+            "payload": {"export": audit_export(), "authorization_reference": authorization_id},
+        },
+    )
+    assert revoked.status_code == 403
 
     invalid = client.post(
         "/v1/jobs", headers=auth,
@@ -151,7 +202,33 @@ def test_delivery_requires_stored_same_tenant_evidence(client, auth):
               "payload": {"report": "draft", "evidence_reference": "not-stored"}},
     ).json()
     client.post("/v1/worker/run-once", headers=auth)
-    assert client.get(f"/v1/jobs/{invalid['job_id']}", headers=auth).json()["status"] == "RETRY_WAIT"
+    assert client.get(f"/v1/jobs/{invalid['job_id']}", headers=auth).json()["status"] == "FAILED"
+
+
+def test_expired_customer_authorization_blocks_engineering_submission(client, auth, monkeypatch):
+    import company_os.api as api_module
+
+    created_at = api_module.time.time()
+    monkeypatch.setattr(api_module.time, "time", lambda: created_at)
+    response = client.post(
+        "/v1/authorizations", headers=auth,
+        json={
+            "customer_name": "Synthetic", "signer_name": "Reviewer", "repository": "demo/sample",
+            "window_start": "2026-09-01", "window_end": "2026-10-01",
+            "authorization_digest": "b" * 64, "lifetime_seconds": 60,
+        },
+    )
+    assert response.status_code == 201, response.text
+    authorization_id = response.json()["authorization_id"]
+    monkeypatch.setattr(api_module.time, "time", lambda: created_at + 61)
+    blocked = client.post(
+        "/v1/jobs", headers=auth,
+        json={
+            "job_type": "engineering", "idempotency_key": "expired-authorization",
+            "payload": {"export": audit_export(), "authorization_reference": authorization_id},
+        },
+    )
+    assert blocked.status_code == 403
 
 
 def test_expired_worker_fenced_and_job_recovered(settings):
@@ -325,7 +402,7 @@ def test_job_payload_secrets_are_redacted_before_persistence(settings):
 
 def test_all_five_agents_complete_offline(client, auth):
     payloads = {
-        "engineering": {"export": audit_export()},
+        "engineering": {"demo": True, "export": audit_export()},
         "research": {
             "sources": [
                 {
