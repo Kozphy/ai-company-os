@@ -19,6 +19,14 @@ from company_os.authorization import AuthorizationError, validate_export
 from company_os.body_limit import BodyLimitMiddleware
 from company_os.config import Settings
 from company_os.db import make_engine, ready, transaction
+from company_os.delivery import (
+    DeliverableInput,
+    DeliverablePackage,
+    ReviewSignoffInput,
+    build_package,
+    sign_off_package,
+    verify_package,
+)
 from company_os.evalforge_import import EvalForgeImportError, summarize_export
 from company_os.jobs import JOB_TYPES, Conflict, cancel, submit
 from company_os.sales import ProspectInput as ProspectRequest
@@ -35,6 +43,7 @@ from company_os.schema import (
     jobs,
     ledger,
     outbox,
+    payloads,
     prospects,
     schedules,
 )
@@ -535,6 +544,329 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                 )
         return {"evaluation_id": identifier, "evaluation": summary}
+
+    @app.post("/v1/jobs/{job_id}/deliverable", status_code=201)
+    def create_deliverable_package(
+        job_id: str,
+        identity: Principal,
+        body: DeliverableInput | None = None,
+    ) -> dict:
+        """Create an immutable local deliverable package for a completed job.
+
+        Assembles the report, evidence digest, authorization scope, and
+        cryptographic manifest. External communication remains disabled.
+
+        Args:
+            job_id: Completed job identifier in the caller's tenant.
+            identity: Authenticated writer.
+            body: Optional explicit deliverable parameters. When omitted,
+                parameters are inferred from the job's stored evidence.
+
+        Returns:
+            The assembled deliverable package.
+
+        Raises:
+            HTTPException: The caller cannot write, the job is not completed,
+                backing evidence is missing, or parameters are invalid.
+        """
+        require_writer(identity)
+        with app.state.engine.connect() as conn:
+            job_row = conn.execute(
+                sa.select(jobs).where(
+                    jobs.c.tenant_id == identity.tenant_id,
+                    jobs.c.job_id == job_id,
+                )
+            ).first()
+            if job_row is None:
+                raise HTTPException(404, "job not found")
+            if job_row.status != "COMPLETED":
+                raise HTTPException(409, "job must be completed to assemble a deliverable package")
+            evidence_row = conn.execute(
+                sa.select(evidence).where(
+                    evidence.c.tenant_id == identity.tenant_id,
+                    evidence.c.job_id == job_id,
+                )
+            ).first()
+            if evidence_row is None:
+                raise HTTPException(404, "evidence not found for job")
+
+        now = time.time()
+        ev_body = evidence_row.body if isinstance(evidence_row.body, dict) else {}
+
+        if body and body.report_markdown:
+            title = body.report_title
+            report_md = body.report_markdown
+            ev_ref = body.evidence_reference or ev_body.get("evidence_reference") or evidence_row.id
+            auth_ref = body.authorization_reference or ev_body.get("customer_authorization_reference")
+        else:
+            title = (body.report_title if body else None) or ev_body.get("title", "Delivery Report")
+            report_md = ev_body.get("report") or ev_body.get("analysis", {}).get("report")
+            if not isinstance(report_md, str) or not report_md:
+                with app.state.engine.connect() as conn:
+                    payload_row = conn.execute(
+                        sa.select(payloads.c.body).where(payloads.c.id == job_row.payload_reference)
+                    ).first()
+                if payload_row and isinstance(payload_row.body, dict):
+                    report_md = payload_row.body.get("report")
+            if not isinstance(report_md, str) or not report_md:
+                raise HTTPException(422, "report content must be supplied or present in job evidence")
+            ref_override = body.evidence_reference if body else None
+            ev_ref = ref_override or ev_body.get("evidence_reference") or evidence_row.id
+            auth_override = body.authorization_reference if body else None
+            auth_ref = auth_override or ev_body.get("customer_authorization_reference")
+
+        auth_digest = ev_body.get("authorization_scope_digest")
+        auth_status = ev_body.get("authorization_status", "VALID" if auth_ref else "NONE")
+        ev_status = ev_body.get("input_evidence_status", "STORED_TENANT_EVIDENCE")
+
+        package = build_package(
+            tenant_id=identity.tenant_id,
+            job_id=job_id,
+            report_title=title,
+            report_markdown=report_md,
+            evidence_reference=ev_ref,
+            evidence_digest=evidence_row.digest,
+            evidence_status=ev_status,
+            authorization_reference=auth_ref,
+            authorization_scope_digest=auth_digest,
+            authorization_status=auth_status,
+            created_at=now,
+        )
+        pkg_data = package.model_dump()
+
+        with transaction(app.state.engine) as conn:
+            pkg_key = f"delivery-pkg-{job_id}"
+            conn.execute(
+                payloads.delete().where(
+                    payloads.c.tenant_id == identity.tenant_id,
+                    payloads.c.id == pkg_key,
+                )
+            )
+            conn.execute(
+                payloads.insert().values(
+                    id=pkg_key,
+                    tenant_id=identity.tenant_id,
+                    digest=package.manifest_digest,
+                    body=pkg_data,
+                )
+            )
+            conn.execute(
+                audit.insert().values(
+                    id=str(uuid.uuid4()),
+                    tenant_id=identity.tenant_id,
+                    actor_id=identity.actor_id,
+                    action="deliverable.package",
+                    resource=f"job:{job_id}",
+                    correlation_id=job_id,
+                    created_at=now,
+                    details={
+                        "package_id": package.package_id,
+                        "manifest_digest": package.manifest_digest,
+                        "report_sha256": package.report_sha256,
+                    },
+                )
+            )
+        return pkg_data
+
+    @app.get("/v1/jobs/{job_id}/deliverable")
+    def get_deliverable_package(job_id: str, identity: Principal) -> dict:
+        """Return the local deliverable package for a job.
+
+        Args:
+            job_id: Job identifier in the caller's tenant.
+            identity: Authenticated caller.
+
+        Returns:
+            The deliverable package including verification digests and review state.
+
+        Raises:
+            HTTPException: No deliverable package exists for the job.
+        """
+        pkg_key = f"delivery-pkg-{job_id}"
+        with app.state.engine.connect() as conn:
+            stored = conn.execute(
+                sa.select(payloads.c.body).where(
+                    payloads.c.tenant_id == identity.tenant_id,
+                    payloads.c.id == pkg_key,
+                )
+            ).first()
+            if stored and isinstance(stored.body, dict):
+                return stored.body
+
+            ev = conn.execute(
+                sa.select(evidence.c.body).where(
+                    evidence.c.tenant_id == identity.tenant_id,
+                    evidence.c.job_id == job_id,
+                )
+            ).first()
+            if ev and isinstance(ev.body, dict) and "package" in ev.body:
+                return ev.body["package"]
+
+        raise HTTPException(404, "deliverable package not found for job")
+
+    @app.post("/v1/jobs/{job_id}/deliverable/signoff")
+    def signoff_deliverable(
+        job_id: str, body: ReviewSignoffInput, identity: Principal
+    ) -> dict:
+        """Record immutable operator sign-off or rejection on a deliverable report.
+
+        Once signed off or rejected, the review status is immutable. Replaying
+        identical review parameters succeeds idempotently; conflicting changes
+        return 409. Operators only.
+
+        Args:
+            job_id: Job identifier in the caller's tenant.
+            body: Target status (``SIGNED_OFF`` or ``REJECTED``) and review notes.
+            identity: Authenticated operator.
+
+        Returns:
+            The updated deliverable package.
+
+        Raises:
+            HTTPException: The caller is not an operator, no deliverable exists,
+                or review status is immutable.
+        """
+        require_operator(identity)
+        pkg_key = f"delivery-pkg-{job_id}"
+        now = time.time()
+        with transaction(app.state.engine) as conn:
+            stored = conn.execute(
+                sa.select(payloads.c.body).where(
+                    payloads.c.tenant_id == identity.tenant_id,
+                    payloads.c.id == pkg_key,
+                )
+            ).first()
+            package_dict = None
+            if stored and isinstance(stored.body, dict):
+                package_dict = stored.body
+            else:
+                ev = conn.execute(
+                    sa.select(evidence.c.body).where(
+                        evidence.c.tenant_id == identity.tenant_id,
+                        evidence.c.job_id == job_id,
+                    )
+                ).first()
+                if ev and isinstance(ev.body, dict) and "package" in ev.body:
+                    package_dict = ev.body["package"]
+
+            if not package_dict:
+                raise HTTPException(404, "deliverable package not found for job")
+
+            current_status = package_dict.get("review_status")
+            if current_status in {"SIGNED_OFF", "REJECTED"}:
+                if (
+                    current_status == body.status
+                    and package_dict.get("reviewed_by") == identity.actor_id
+                    and package_dict.get("review_notes") == body.notes
+                ):
+                    return package_dict
+                raise HTTPException(409, "deliverable review is immutable and cannot be changed")
+
+            pkg = DeliverablePackage(**package_dict)
+            try:
+                updated_pkg = sign_off_package(
+                    pkg,
+                    reviewer_id=identity.actor_id,
+                    status=body.status,
+                    notes=body.notes,
+                    now=now,
+                )
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+            updated_data = updated_pkg.model_dump()
+            conn.execute(
+                payloads.delete().where(
+                    payloads.c.tenant_id == identity.tenant_id,
+                    payloads.c.id == pkg_key,
+                )
+            )
+            conn.execute(
+                payloads.insert().values(
+                    id=pkg_key,
+                    tenant_id=identity.tenant_id,
+                    digest=updated_pkg.manifest_digest,
+                    body=updated_data,
+                )
+            )
+
+            ev_row = conn.execute(
+                sa.select(evidence.c.id, evidence.c.body).where(
+                    evidence.c.tenant_id == identity.tenant_id,
+                    evidence.c.job_id == job_id,
+                )
+            ).first()
+            if ev_row and isinstance(ev_row.body, dict) and "package" in ev_row.body:
+                updated_ev_body = dict(ev_row.body)
+                updated_ev_body["package"] = updated_data
+                updated_ev_body["review_status"] = body.status
+                conn.execute(
+                    evidence.update()
+                    .where(evidence.c.id == ev_row.id)
+                    .values(body=updated_ev_body)
+                )
+
+            conn.execute(
+                audit.insert().values(
+                    id=str(uuid.uuid4()),
+                    tenant_id=identity.tenant_id,
+                    actor_id=identity.actor_id,
+                    action="deliverable.signoff",
+                    resource=f"job:{job_id}",
+                    correlation_id=job_id,
+                    created_at=now,
+                    details={
+                        "package_id": updated_pkg.package_id,
+                        "manifest_digest": updated_pkg.manifest_digest,
+                        "review_status": body.status,
+                        "notes": body.notes,
+                    },
+                )
+            )
+        return updated_data
+
+    @app.get("/v1/jobs/{job_id}/deliverable/verify")
+    def verify_deliverable(job_id: str, identity: Principal) -> dict:
+        """Verify the cryptographic integrity and offline status of a deliverable.
+
+        Recomputes SHA-256 digests over the report content and manifest fields,
+        confirming external transmission remains disabled.
+
+        Args:
+            job_id: Job identifier in the caller's tenant.
+            identity: Authenticated caller.
+
+        Returns:
+            Verification summary with boolean validity checks.
+
+        Raises:
+            HTTPException: No deliverable package exists for the job.
+        """
+        pkg_key = f"delivery-pkg-{job_id}"
+        with app.state.engine.connect() as conn:
+            stored = conn.execute(
+                sa.select(payloads.c.body).where(
+                    payloads.c.tenant_id == identity.tenant_id,
+                    payloads.c.id == pkg_key,
+                )
+            ).first()
+            package_dict = None
+            if stored and isinstance(stored.body, dict):
+                package_dict = stored.body
+            else:
+                ev = conn.execute(
+                    sa.select(evidence.c.body).where(
+                        evidence.c.tenant_id == identity.tenant_id,
+                        evidence.c.job_id == job_id,
+                    )
+                ).first()
+                if ev and isinstance(ev.body, dict) and "package" in ev.body:
+                    package_dict = ev.body["package"]
+
+        if not package_dict:
+            raise HTTPException(404, "deliverable package not found for job")
+
+        return verify_package(package_dict)
 
     @app.post("/v1/worker/run-once")
     def run_worker(identity: Principal) -> dict:

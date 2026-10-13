@@ -123,13 +123,16 @@ def execute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         evidence_id = _safe(payload.get("evidence_reference", ""), 64)
         if not isinstance(report, str) or not report or len(report) > 1_000_000 or not evidence_id:
             raise ValueError("validated evidence and bounded report required")
+        title = _safe(payload.get("title", "Delivery Report"), 128)
         return {
             "workflow": "delivery",
             "mode": "OFFLINE_DEMO",
+            "title": title,
             "evidence_reference": evidence_id,
-            "report_sha256": hashlib.sha256(report.encode()).hexdigest(),
+            "report_sha256": hashlib.sha256(report.encode("utf-8")).hexdigest(),
             "review_status": "AWAITING_HUMAN_SIGNOFF",
             "external_delivery": "DISABLED",
+            "communication": "DISABLED",
         }
     if kind == "finance":
         rows = payload.get("entries", [])

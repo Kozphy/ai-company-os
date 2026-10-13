@@ -1,5 +1,6 @@
 """Local worker and deterministic evaluation gate."""
 
+import hashlib
 import time
 import uuid
 
@@ -8,6 +9,7 @@ from sqlalchemy.engine import Engine
 
 from company_os import agents
 from company_os.authorization import validate_export, validate_scope
+from company_os.delivery import build_package
 from company_os.jobs import claim, fail, finish, start_evaluation
 from company_os.schema import evaluations, evidence
 
@@ -75,6 +77,16 @@ def deterministic_evaluation(kind: str, payload: dict, output: dict) -> dict:
             bool(output.get("evidence_reference"))
             and output.get("input_evidence_status") == "DEMO_ONLY"
         )
+        checks["review_status_is_awaiting_signoff"] = (
+            output.get("review_status") == "AWAITING_HUMAN_SIGNOFF"
+        )
+        checks["external_delivery_disabled"] = (
+            output.get("external_delivery") == "DISABLED"
+        )
+        checks["communication_disabled"] = (
+            output.get("communication") == "DISABLED"
+        )
+        checks["report_sha256_present"] = bool(output.get("report_sha256"))
     if kind == "finance":
         checks["unverified_financial_claims_not_counted"] = (
             output.get("bank_verified_income_micro_usd") is None
@@ -142,12 +154,14 @@ class Worker:
                 output["authorization_scope_digest"] = export_authorization["scope_digest"]
             if task["job_type"] == "delivery":
                 reference = task["payload"].get("evidence_reference")
+                stored = None
                 if isinstance(reference, str) and reference.startswith("demo-"):
                     output["input_evidence_status"] = "DEMO_ONLY"
+                    output["authorization_status"] = "DEMO_ONLY"
                 else:
                     with self.engine.connect() as conn:
                         stored = conn.execute(
-                            sa.select(evidence.c.id, evidence.c.body).where(
+                            sa.select(evidence.c.id, evidence.c.body, evidence.c.digest).where(
                                 evidence.c.id == reference,
                                 evidence.c.tenant_id == task["tenant_id"],
                             )
@@ -169,6 +183,27 @@ class Worker:
                     output["authorization_status"] = "VALID"
                     output["customer_authorization_reference"] = validated_scope["authorization_id"]
                     output["authorization_scope_digest"] = validated_scope["scope_digest"]
+                ref_str = str(reference or "")
+                evidence_digest = (
+                    stored.digest
+                    if stored is not None
+                    else f"demo-{hashlib.sha256(ref_str.encode()).hexdigest()[:16]}"
+                )
+                package = build_package(
+                    tenant_id=task["tenant_id"],
+                    job_id=task["job_id"],
+                    report_title=output.get("title", "Delivery Report"),
+                    report_markdown=task["payload"]["report"],
+                    evidence_reference=ref_str,
+                    evidence_digest=evidence_digest,
+                    evidence_status=output["input_evidence_status"],
+                    authorization_reference=output.get("customer_authorization_reference"),
+                    authorization_scope_digest=output.get("authorization_scope_digest"),
+                    authorization_status=output.get("authorization_status", "NONE"),
+                    created_at=moment,
+                )
+                output["package"] = package.model_dump()
+                output["manifest_digest"] = package.manifest_digest
             if not start_evaluation(self.engine, task, now=moment):
                 return False
             report_reference = output.get("evidence_reference")
