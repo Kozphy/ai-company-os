@@ -1,0 +1,23 @@
+company_os/agents.py
+  s_f0338e8151b547::t_d8adb5115beb1d 126,130,132,135
+company_os/api.py
+  s_f0338e8151b547::t_6eb8be82b59472 22-29,46,548-870
+company_os/worker.py
+  s_f0338e8151b547::t_cca5ee3b530b8d 3,12,80-89,157,160,164,186-206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c6651a8e338dec503d900c071e972de86ff6b9e2",
+  "prompts": {},
+  "sessions": {
+    "s_f0338e8151b547": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12e39-c7f7-7451-95c1-308566f426f2",
+        "model": "unknown"
+      },
+      "human_author": "Zixsa <50504962+Kozphy@users.noreply.github.com>"
+    }
+  }
+}
