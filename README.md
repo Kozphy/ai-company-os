@@ -1,4 +1,4 @@
-# Kozphy AI Company OS
+# Kozia AI Company OS
 
 Local, evidence-first solo-operator MVP. Workflows are deterministic offline demonstrations and imported-export analysis. No live model, autonomous GitHub mutation, customer, paid pilot, or cloud deployment is configured.
 
