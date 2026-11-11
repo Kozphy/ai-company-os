@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
 from company_os.db import transaction
-from company_os.schema import budgets, control, events, evidence, flags, jobs, payloads
+from company_os.schema import approvals, budgets, control, events, evidence, flags, jobs, payloads
 from company_os.security import digest, redact
 
 STATUSES = {
@@ -508,3 +508,116 @@ def cancel(engine: Engine, tenant: str, job_id: str, *, now: float | None = None
             .values(reserved_micro_usd=budgets.c.reserved_micro_usd - row.estimated_cost)
         )
         return True
+
+
+def hold_for_approval(
+    engine: Engine,
+    task: dict[str, Any],
+    reason: str,
+    *,
+    now: float | None = None,
+) -> bool:
+    """Transition a leased running job to WAITING_APPROVAL.
+
+    The lease is cleared and the job waits until an authorized operator
+    approves it via ``approve_job``.
+
+    Args:
+        engine: Database engine.
+        task: Leased task dict containing ``job_id`` and ``lease_token``.
+        reason: Explanatory error code or review reason.
+        now: Unix timestamp. Defaults to current time.
+
+    Returns:
+        ``True`` when the leased job was successfully placed on hold.
+        ``False`` if the lease was lost or the job is not RUNNING.
+    """
+    now = time.time() if now is None else now
+    with transaction(engine) as conn:
+        result = conn.execute(
+            jobs.update()
+            .where(
+                jobs.c.job_id == task["job_id"],
+                jobs.c.lease_token == task["lease_token"],
+                jobs.c.status == "RUNNING",
+            )
+            .values(
+                status="WAITING_APPROVAL",
+                error_code=reason[:64],
+                lease_owner=None,
+                lease_token=None,
+                lease_expiration=None,
+                updated_at=now,
+            )
+        )
+        return result.rowcount == 1
+
+
+def approve_job(
+    engine: Engine,
+    tenant: str,
+    job_id: str,
+    operator_id: str,
+    approval_id: str,
+    *,
+    now: float | None = None,
+) -> bool:
+    """Approve a WAITING_APPROVAL job using an active, unexpired approval record.
+
+    Verifies that the approval belongs to ``tenant``, has not expired,
+    has not been used (``used_at IS NULL``), and matches ``approval_id``.
+    Transitions the job from WAITING_APPROVAL to QUEUED and binds
+    ``approval_reference`` on the job.
+
+    Args:
+        engine: Database engine.
+        tenant: Tenant identifier.
+        job_id: Job identifier to approve.
+        operator_id: Operator issuing the approval.
+        approval_id: Existing record id in the approvals table.
+        now: Unix timestamp. Defaults to current time.
+
+    Returns:
+        ``True`` when the job was successfully approved and queued.
+
+    Raises:
+        Conflict: The approval is missing, expired, already used, or
+            the job is not in WAITING_APPROVAL status.
+    """
+    now = time.time() if now is None else now
+    with transaction(engine) as conn:
+        record = conn.execute(
+            sa.select(approvals).where(
+                approvals.c.id == approval_id,
+                approvals.c.tenant_id == tenant,
+            )
+        ).first()
+        if record is None or record.used_at is not None or record.expires_at <= now:
+            raise Conflict("approval_missing_expired_or_used")
+        job = conn.execute(
+            sa.select(jobs).where(
+                jobs.c.job_id == job_id,
+                jobs.c.tenant_id == tenant,
+            )
+        ).first()
+        if job is None or job.status != "WAITING_APPROVAL":
+            raise Conflict("job_not_waiting_approval")
+        conn.execute(
+            approvals.update().where(approvals.c.id == approval_id).values(used_at=now)
+        )
+        result = conn.execute(
+            jobs.update()
+            .where(
+                jobs.c.job_id == job_id,
+                jobs.c.tenant_id == tenant,
+                jobs.c.status == "WAITING_APPROVAL",
+            )
+            .values(
+                status="QUEUED",
+                approval_reference=approval_id,
+                error_code=None,
+                available_at=now,
+                updated_at=now,
+            )
+        )
+        return result.rowcount == 1

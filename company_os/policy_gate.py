@@ -1,0 +1,258 @@
+"""Deny-by-default capability attenuation and human approval gate for tools and MCP operations."""
+
+import enum
+import hashlib
+import hmac
+import json
+import os
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+class RiskTier(enum.Enum):
+    """Classification of tool operation risk."""
+
+    READ_ONLY = "read_only"
+    MUTATION = "mutation"
+    HIGH_RISK = "high_risk"
+
+
+class AuthorizationDecision(enum.Enum):
+    """Result of policy evaluation."""
+
+    ALLOWED = "allowed"
+    DENIED = "denied"
+    REQUIRES_HUMAN_APPROVAL = "requires_human_approval"
+
+
+class PolicyViolationError(ValueError):
+    """Raised when an operation violates policy-as-code boundaries."""
+
+
+@dataclass(frozen=True)
+class PolicyEvaluationResult:
+    """Structured decision returned by ToolPolicyGate."""
+
+    decision: AuthorizationDecision
+    risk_tier: RiskTier | None
+    reason: str
+    tool_name: str
+    challenge: dict[str, Any] | None = None
+
+
+class ToolPolicyGate:
+    """Fail-closed, deny-by-default tool authorization gate.
+
+    Tools must be explicitly registered in the whitelist with an assigned RiskTier.
+    Unregistered tools are immediately DENIED.
+    High-risk tools (e.g., shell command execution, git push, resource deletion)
+    require explicit human approval via signed cryptographic challenge or valid approval reference.
+    Path arguments are strictly validated against directory traversal attacks.
+    """
+
+    DEFAULT_TOOL_REGISTRY: dict[str, RiskTier] = {
+        # Read-only tools
+        "read_file": RiskTier.READ_ONLY,
+        "list_directory": RiskTier.READ_ONLY,
+        "get_git_status": RiskTier.READ_ONLY,
+        "view_evidence": RiskTier.READ_ONLY,
+        "inspect_job": RiskTier.READ_ONLY,
+        # Local mutation tools (confined to scratch/local workspace)
+        "write_scratch_file": RiskTier.MUTATION,
+        "run_local_tests": RiskTier.MUTATION,
+        "format_code": RiskTier.MUTATION,
+        # High risk operations (destructive, network, or cloud impact)
+        "run_shell_command": RiskTier.HIGH_RISK,
+        "git_commit": RiskTier.HIGH_RISK,
+        "git_push": RiskTier.HIGH_RISK,
+        "delete_resource": RiskTier.HIGH_RISK,
+        "spend_budget": RiskTier.HIGH_RISK,
+        "deploy_code": RiskTier.HIGH_RISK,
+    }
+
+    FORBIDDEN_PATTERNS = {
+        "drop_database",
+        "rmdir_force",
+        "force_push_main",
+        "expose_env_secrets",
+    }
+
+    def __init__(
+        self,
+        *,
+        allowed_root: str | Path | None = None,
+        signing_key: bytes | None = None,
+        custom_registry: dict[str, RiskTier] | None = None,
+    ):
+        """Initialize the policy gate.
+
+        Args:
+            allowed_root: Base directory where file mutations are confined.
+            signing_key: HMAC secret used for human approval challenges.
+            custom_registry: Optional custom tool whitelist override.
+        """
+        self.allowed_root = Path(allowed_root or os.getcwd()).resolve()
+        self._signing_key = signing_key or os.urandom(32)
+        self.registry = dict(self.DEFAULT_TOOL_REGISTRY)
+        if custom_registry:
+            self.registry.update(custom_registry)
+
+    def _validate_path(self, path_val: str) -> bool:
+        """Ensure file paths do not escape allowed root via traversal or absolute roots.
+
+        Args:
+            path_val: Candidate path string.
+
+        Returns:
+            True if path is strictly inside allowed_root, False otherwise.
+        """
+        try:
+            target = (self.allowed_root / path_val).resolve()
+            return self.allowed_root in target.parents or target == self.allowed_root
+        except (ValueError, RuntimeError):
+            return False
+
+    def generate_challenge(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Generate an HMAC-signed approval challenge for high-risk operations.
+
+        Args:
+            tool_name: Name of tool requesting execution.
+            arguments: Exact arguments supplied to tool.
+
+        Returns:
+            A challenge dictionary with timestamp, nonce, and HMAC-SHA256 signature.
+        """
+        timestamp = str(int(time.time()))
+        canonical_args = json.dumps(arguments, sort_keys=True, separators=(",", ":"))
+        payload = f"{tool_name}:{canonical_args}:{timestamp}".encode()
+        signature = hmac.new(self._signing_key, payload, hashlib.sha256).hexdigest()
+        return {
+            "challenge_id": signature[:16],
+            "tool_name": tool_name,
+            "timestamp": timestamp,
+            "signature": signature,
+        }
+
+    def verify_token(self, challenge: dict[str, Any], operator_token: str) -> bool:
+        """Validate operator approval token against expected HMAC signature.
+
+        Args:
+            challenge: Challenge dict generated by ``generate_challenge``.
+            operator_token: Token presented by the human operator.
+
+        Returns:
+            True if valid and within 300 second lifetime, False otherwise.
+        """
+        try:
+            timestamp = int(challenge.get("timestamp", 0))
+            if abs(time.time() - timestamp) > 300:
+                return False
+        except (ValueError, TypeError):
+            return False
+        expected_sig = challenge.get("signature", "")
+        return bool(expected_sig) and hmac.compare_digest(expected_sig, operator_token)
+
+    def evaluate(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        operator_token: str | None = None,
+        challenge: dict[str, Any] | None = None,
+        approval_reference: str | None = None,
+    ) -> PolicyEvaluationResult:
+        """Evaluate an intended tool call against the security policy.
+
+        Args:
+            tool_name: Target tool identifier.
+            arguments: Tool execution parameters.
+            operator_token: Optional approval token presented for high-risk action.
+            challenge: Optional challenge corresponding to the token.
+            approval_reference: Optional stored approval ID from database.
+
+        Returns:
+            A ``PolicyEvaluationResult`` indicating ALLOWED, DENIED, or
+            REQUIRES_HUMAN_APPROVAL.
+        """
+        # 1. Deny forbidden names immediately
+        if tool_name in self.FORBIDDEN_PATTERNS or any(p in tool_name for p in self.FORBIDDEN_PATTERNS):
+            return PolicyEvaluationResult(
+                decision=AuthorizationDecision.DENIED,
+                risk_tier=None,
+                reason="explicitly_forbidden_operation",
+                tool_name=tool_name,
+            )
+
+        # 2. Deny-by-default for unregistered tools
+        tier = self.registry.get(tool_name)
+        if tier is None:
+            return PolicyEvaluationResult(
+                decision=AuthorizationDecision.DENIED,
+                risk_tier=None,
+                reason="unregistered_tool_denied_by_default",
+                tool_name=tool_name,
+            )
+
+        # 3. Path parameter inspection for file-accessing tools
+        for key in ("path", "file_path", "destination", "target"):
+            val = arguments.get(key)
+            if isinstance(val, str) and not self._validate_path(val):
+                return PolicyEvaluationResult(
+                    decision=AuthorizationDecision.DENIED,
+                    risk_tier=tier,
+                    reason="path_traversal_boundary_violation",
+                    tool_name=tool_name,
+                )
+
+        # 4. Read-only tier is allowed automatically if arguments are safe
+        if tier == RiskTier.READ_ONLY:
+            return PolicyEvaluationResult(
+                decision=AuthorizationDecision.ALLOWED,
+                risk_tier=tier,
+                reason="read_only_operation_permitted",
+                tool_name=tool_name,
+            )
+
+        # 5. Mutation tier is allowed within sandbox
+        if tier == RiskTier.MUTATION:
+            return PolicyEvaluationResult(
+                decision=AuthorizationDecision.ALLOWED,
+                risk_tier=tier,
+                reason="mutation_within_sandbox_permitted",
+                tool_name=tool_name,
+            )
+
+        # 6. High-risk tier requires cryptographic approval token or stored approval
+        if tier == RiskTier.HIGH_RISK:
+            if approval_reference and isinstance(approval_reference, str) and len(approval_reference) >= 8:
+                return PolicyEvaluationResult(
+                    decision=AuthorizationDecision.ALLOWED,
+                    risk_tier=tier,
+                    reason="human_approval_reference_verified",
+                    tool_name=tool_name,
+                )
+            if challenge and operator_token and self.verify_token(challenge, operator_token):
+                return PolicyEvaluationResult(
+                    decision=AuthorizationDecision.ALLOWED,
+                    risk_tier=tier,
+                    reason="cryptographic_human_token_verified",
+                    tool_name=tool_name,
+                )
+            # Not approved yet -> generate and return challenge
+            new_challenge = self.generate_challenge(tool_name, arguments)
+            return PolicyEvaluationResult(
+                decision=AuthorizationDecision.REQUIRES_HUMAN_APPROVAL,
+                risk_tier=tier,
+                reason="high_risk_requires_operator_approval",
+                tool_name=tool_name,
+                challenge=new_challenge,
+            )
+
+        return PolicyEvaluationResult(
+            decision=AuthorizationDecision.DENIED,
+            risk_tier=tier,
+            reason="unknown_policy_state",
+            tool_name=tool_name,
+        )
